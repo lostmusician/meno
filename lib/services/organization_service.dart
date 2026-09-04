@@ -28,12 +28,7 @@ class TaggingService {
     }
     final day = await _database.journalDay(entry.dateKey);
     final tags = await _database.allTags();
-    final frequency = <String, int>{};
-    for (final tag in tags) {
-      frequency[tag.normalizedName] = (await _database.entryIdsForTag(
-        tag.id,
-      )).length;
-    }
+    final frequency = await _database.tagUsageCounts();
     final entries = await _database.allNonEmptyEntries();
     final candidates = await _extractor.extract(
       content: entry.content,
@@ -77,7 +72,7 @@ class TaggingService {
         JournalTag? closest;
         var closestScore = .0;
         for (final tag in existingTags) {
-          final similarity = _cosine(vector, tagVectors[tag]!);
+          final similarity = cosineSimilarity(vector, tagVectors[tag]!);
           if (similarity > closestScore) {
             closest = tag;
             closestScore = similarity;
@@ -94,15 +89,6 @@ class TaggingService {
     } catch (_) {
       return candidates;
     }
-  }
-
-  double _cosine(List<double> left, List<double> right) {
-    if (left.length != right.length || left.isEmpty) return 0;
-    var score = 0.0;
-    for (var index = 0; index < left.length; index++) {
-      score += left[index] * right[index];
-    }
-    return score.clamp(-1, 1);
   }
 
   Future<void> organizeBackCatalog({
@@ -131,12 +117,8 @@ class RelationshipService {
     if (source == null) return const [];
     final sourceTags = await _database.tagsForEntry(entryId);
     final shared = <String, Set<String>>{};
-    for (final entryTag in sourceTags) {
-      final entryIds = await _database.entryIdsForTag(entryTag.tag.id);
-      for (final candidateId in entryIds) {
-        if (candidateId == entryId) continue;
-        shared.putIfAbsent(candidateId, () => {}).add(entryTag.tag.name);
-      }
+    for (final candidate in await _database.sharedTagCandidates(entryId)) {
+      shared.putIfAbsent(candidate.entryId, () => {}).add(candidate.tagName);
     }
     final scores = <String, double>{};
     final reasons = <String, List<String>>{};
@@ -147,18 +129,13 @@ class RelationshipService {
           .map((tag) => 'Shared tag: $tag')
           .toList();
     }
-    final scriptures = await _database.scripturesForEntry(entryId);
-    for (final scripture in scriptures) {
-      final candidateIds = await _database.entryIdsForScripture(
-        scripture.passageId,
-      );
-      for (final candidateId in candidateIds) {
-        if (candidateId == entryId) continue;
-        scores[candidateId] = (scores[candidateId] ?? 0) + .15;
-        reasons
-            .putIfAbsent(candidateId, () => [])
-            .add('Shared Scripture: ${scripture.reference}');
-      }
+    for (final candidate in await _database.sharedScriptureCandidates(
+      entryId,
+    )) {
+      scores[candidate.entryId] = (scores[candidate.entryId] ?? 0) + .15;
+      reasons
+          .putIfAbsent(candidate.entryId, () => [])
+          .add('Shared Scripture: ${candidate.reference}');
     }
 
     var usedEmbeddings = false;
@@ -169,14 +146,17 @@ class RelationshipService {
         for (final candidate in entries) {
           if (candidate.id == entryId) continue;
           final candidateVectors = await _embeddingsFor(candidate);
-          final wholeSimilarity = _cosine(
+          final wholeSimilarity = cosineSimilarity(
             sourceVectors.first,
             candidateVectors.first,
           );
           var chunkMaximum = wholeSimilarity;
           for (final left in sourceVectors) {
             for (final right in candidateVectors) {
-              chunkMaximum = math.max(chunkMaximum, _cosine(left, right));
+              chunkMaximum = math.max(
+                chunkMaximum,
+                cosineSimilarity(left, right),
+              );
             }
           }
           final similarity = .65 * wholeSimilarity + .35 * chunkMaximum;
@@ -265,15 +245,6 @@ class RelationshipService {
       vector: representations.expand((vector) => vector).toList(),
     );
     return representations;
-  }
-
-  double _cosine(List<double> left, List<double> right) {
-    if (left.length != right.length || left.isEmpty) return 0;
-    var product = 0.0;
-    for (var index = 0; index < left.length; index++) {
-      product += left[index] * right[index];
-    }
-    return product.clamp(-1, 1);
   }
 
   Future<void> rebuildAll({

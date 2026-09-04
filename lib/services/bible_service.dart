@@ -5,10 +5,9 @@ import 'package:http/http.dart' as http;
 import '../models/journal_entry.dart';
 
 class BibleBook {
-  const BibleBook(this.id, this.name, this.chapterCount);
+  const BibleBook(this.id, this.name);
   final String id;
   final String name;
-  final int chapterCount;
 }
 
 abstract interface class BibleProvider {
@@ -21,11 +20,6 @@ abstract interface class BibleProvider {
     int chapter,
   );
   Future<BiblePassage> passage(BibleVersion version, String passageId);
-  Future<List<BiblePassage>> search(
-    BibleVersion version,
-    String query, {
-    int limit = 50,
-  });
 }
 
 class YouVersionBibleProvider implements BibleProvider {
@@ -89,7 +83,6 @@ class YouVersionBibleProvider implements BibleProvider {
     id: '${item['id']}',
     abbreviation: '${item['localized_abbreviation'] ?? item['abbreviation']}',
     title: '${item['localized_title'] ?? item['title']}',
-    languageTag: '${item['language_tag'] ?? 'en'}',
     copyright: '${item['copyright'] ?? ''}',
   );
 
@@ -122,11 +115,6 @@ class YouVersionBibleProvider implements BibleProvider {
           (item) => BibleBook(
             '${item['usfm'] ?? item['id']}',
             '${item['localized_title'] ?? item['title'] ?? item['name']}',
-            item['chapter_count'] as int? ??
-                (item['chapters'] as List<dynamic>? ?? const []).length.clamp(
-                  1,
-                  150,
-                ),
           ),
         )
         .toList();
@@ -260,17 +248,6 @@ class YouVersionBibleProvider implements BibleProvider {
     }
     return text.replaceAll(RegExp(r'\s+'), ' ').trim();
   }
-
-  @override
-  Future<List<BiblePassage>> search(
-    BibleVersion version,
-    String query, {
-    int limit = 50,
-  }) => Future.error(
-    UnsupportedError(
-      'YouVersion does not expose general full-text Bible search through this provider.',
-    ),
-  );
 
   Future<Map<String, dynamic>> _get(String path) async {
     final response = await _client

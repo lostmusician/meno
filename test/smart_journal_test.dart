@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meno/models/journal_entry.dart';
 import 'package:meno/services/database_service.dart';
@@ -94,13 +92,11 @@ void main() {
           ScriptureReference(
             id: 'verse',
             entryId: entry.id,
-            source: 'bundled',
             bibleId: 'BSB',
             translationAbbreviation: 'BSB',
             passageId: 'JHN.3.16',
             reference: 'John 3:16',
             copyright: 'Public domain',
-            cachedText: 'For God so loved the world.',
           ),
         );
 
@@ -155,76 +151,6 @@ void main() {
       expect(embedding?.vector, closeToList(const [.25, .5, .75]));
       expect(await database.relationshipsForEntry(source.id), hasLength(8));
     });
-  });
-
-  test('migrates v3 entries to freeform and rebuilds search', () async {
-    final directory = await Directory.systemTemp.createTemp('meno-v4-');
-    addTearDown(() => directory.delete(recursive: true));
-    final path = '${directory.path}/legacy.sqlite';
-    final legacy = await databaseFactoryFfi.openDatabase(
-      path,
-      options: OpenDatabaseOptions(
-        version: 3,
-        onCreate: (db, version) async {
-          await db.execute('''
-            CREATE TABLE journal_days (
-              date_key TEXT PRIMARY KEY, gratitude TEXT NOT NULL DEFAULT '',
-              created_at TEXT NOT NULL, updated_at TEXT NOT NULL)
-          ''');
-          await db.execute('''
-            CREATE TABLE day_entries (
-              id TEXT PRIMARY KEY, date_key TEXT NOT NULL,
-              entry_type TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
-              content TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL)
-          ''');
-          await db.execute('''
-            CREATE TABLE daily_checkins (
-              date_key TEXT PRIMARY KEY, mood_angle REAL NOT NULL,
-              mood_intensity REAL NOT NULL, created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL)
-          ''');
-          await db.execute('''
-            CREATE TABLE app_settings (
-              setting_key TEXT PRIMARY KEY, setting_value TEXT NOT NULL)
-          ''');
-        },
-      ),
-    );
-    const dateKey = '2026-09-01';
-    final timestamp = DateTime(2026, 9, 1).toUtc().toIso8601String();
-    await legacy.insert('journal_days', {
-      'date_key': dateKey,
-      'gratitude': 'Coffee',
-      'created_at': timestamp,
-      'updated_at': timestamp,
-    });
-    await legacy.insert('day_entries', {
-      'id': 'legacy',
-      'date_key': dateKey,
-      'entry_type': 'daily',
-      'title': 'Old title',
-      'content': 'Migration preserves this thought',
-      'created_at': timestamp,
-      'updated_at': timestamp,
-    });
-    await legacy.close();
-
-    final migrated = DatabaseService(
-      factory: databaseFactoryFfi,
-      databasePath: path,
-    );
-    addTearDown(migrated.close);
-    expect(
-      (await migrated.entryById('legacy'))?.purpose,
-      EntryPurpose.freeform,
-    );
-    expect(
-      (await migrated.searchEntries(
-        const JournalSearchQuery(text: 'preserves'),
-      )).single.entry.id,
-      'legacy',
-    );
   });
 
   group('organization services', () {

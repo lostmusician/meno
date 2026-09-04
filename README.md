@@ -47,15 +47,17 @@ replace manual tags.
 Quiet Time logging is optional and hidden when disabled. It adds:
 
 - A focused choice of ESV, NIV, ERV, and NKJV through YouVersion.
-- A Scripture workspace shown beside the editor on desktop and as a full-height
-  sheet on phones.
-- Structured verse attachments and insertion at the editor cursor.
+- A continuous Scripture reader shown in a sliding split view on desktop and
+  as a draggable, near-full-height sheet on phones.
+- Single-verse and contiguous-range selection with linked, borderless verse
+  blocks below the journal text.
 - Quiet Time entries with optional Observation, Application, and Prayer fields.
 - Translation access when the app has an approved registration, the requested
   version is licensed, and the device is online.
 
 Only user-authored reflection and structured Scripture references are embedded.
-Licensed passage text is not stored in journal records.
+Licensed passage text is resolved on demand and is not stored in journal
+records.
 
 ### Optional YouVersion setup
 
@@ -86,8 +88,9 @@ desktop target and pass its identifier to `flutter run -d`.
 ## Architecture
 
 - `lib/models` — journal, discovery, embedding, and Scripture data types.
-- `lib/services/database_service.dart` — schema-v4 SQLite persistence, FTS5,
-  pagination, migrations, and local search.
+- `lib/services/database_schema.dart` — the current SQLite schema.
+- `lib/services/database_service.dart` — runtime persistence, FTS5,
+  pagination, transactions, and local search.
 - `lib/services/keyphrase_service.dart` — RAKE extraction and journal-specific
   phrase filtering.
 - `lib/services/embedding_service.dart` — model lifecycle, checksum validation,
@@ -100,9 +103,8 @@ desktop target and pass its identifier to `flutter run -d`.
 - `lib/ui` — mood dial, full-page editor, binder, discovery, settings, and
   Scripture workspace.
 
-SQLite schema version 4 preserves legacy journal and reflection data while
-adding tags, embeddings, relationships, Scripture attachments, Quiet Time
-fields, entry purposes, and a synchronized FTS5 index. Drafts autosave after
+The unreleased app uses a clean schema version 1. A higher-version development
+database is deleted and recreated rather than migrated. Drafts autosave after
 700 ms of inactivity. Optional back-catalog indexing is cancellable and never
 blocks journal editing.
 

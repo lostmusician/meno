@@ -46,7 +46,6 @@ void main() {
         'ERV',
         'NKJV',
       ]);
-      expect(versions.every((version) => !version.isOffline), isTrue);
       expect(requestedUri?.queryParametersAll['language_ranges[]'], ['en*']);
       expect(requestedUri?.queryParameters, isNot(contains('language_ranges')));
     });
@@ -125,13 +124,12 @@ void main() {
         id: '111',
         abbreviation: 'NIV',
         title: 'New International Version',
-        languageTag: 'en',
         copyright: 'NIV attribution',
       );
 
       final verses = await provider.chapterVerses(
         version,
-        const BibleBook('JHN', 'John', 21),
+        const BibleBook('JHN', 'John'),
         3,
       );
 
@@ -174,7 +172,6 @@ void main() {
         id: 'licensed',
         abbreviation: 'TEST',
         title: 'Test Bible',
-        languageTag: 'en',
         copyright: 'Licensed attribution',
       );
       final passage = await provider.passage(version, 'JHN.3.16');

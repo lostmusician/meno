@@ -8,6 +8,10 @@ import 'package:sqflite/sqflite.dart' as mobile;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../models/journal_entry.dart';
+import 'database_schema.dart' as schema;
+
+typedef SharedTagCandidate = ({String entryId, String tagName});
+typedef SharedScriptureCandidate = ({String entryId, String reference});
 
 class DatabaseService {
   DatabaseService({
@@ -18,13 +22,11 @@ class DatabaseService {
        _injectedPath = databasePath,
        _injectedSupportDirectory = supportDirectory;
 
-  static const schemaVersion = 4;
-  static const eveningSettingKey = 'evening_minutes';
-  static const smartOrganizationSettingKey = 'smart_organization_enabled';
-  // Keep the original persisted key so existing opt-in preferences survive
-  // the user-facing rename to Quiet Time logging.
-  static const quietTimeLoggingSettingKey = 'christian_mode_enabled';
-  static const preferredBibleSettingKey = 'preferred_bible_id';
+  static const schemaVersion = schema.databaseSchemaVersion;
+  static const eveningSettingKey = schema.eveningSettingKey;
+  static const smartOrganizationSettingKey = schema.smartOrganizationSettingKey;
+  static const quietTimeLoggingSettingKey = schema.quietTimeLoggingSettingKey;
+  static const preferredBibleSettingKey = schema.preferredBibleSettingKey;
 
   final DatabaseFactory? _injectedFactory;
   final String? _injectedPath;
@@ -41,305 +43,10 @@ class DatabaseService {
       options: OpenDatabaseOptions(
         version: schemaVersion,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
-        onCreate: (db, version) => _createSchema(db),
-        onUpgrade: _upgradeSchema,
+        onCreate: (db, version) => schema.createDatabaseSchema(db),
+        onDowngrade: onDatabaseDowngradeDelete,
       ),
     );
-  }
-
-  Future<void> _createSchema(Database db) async {
-    await _createCheckInTable(db);
-    await _createDailyTables(db);
-    await _createSmartJournalTables(db);
-  }
-
-  Future<void> _upgradeSchema(
-    Database db,
-    int oldVersion,
-    int newVersion,
-  ) async {
-    if (oldVersion < 2) {
-      await db.execute(
-        "ALTER TABLE journal_entries ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'",
-      );
-      await db.execute('ALTER TABLE journal_entries ADD COLUMN closed_at TEXT');
-      await db.execute(
-        'ALTER TABLE journal_entries ADD COLUMN reflection_question TEXT',
-      );
-      await db.execute(
-        "ALTER TABLE journal_entries ADD COLUMN reflection_reply TEXT NOT NULL DEFAULT ''",
-      );
-      await db.execute('''
-        UPDATE journal_entries
-        SET status = CASE WHEN trim(content) = '' THEN 'draft' ELSE 'closed' END,
-            closed_at = CASE WHEN trim(content) = '' THEN NULL ELSE updated_at END
-      ''');
-      await db.execute('''
-        UPDATE journal_entries
-        SET reflection_question = (
-          SELECT question FROM ai_annotations
-          WHERE ai_annotations.entry_id = journal_entries.id
-          ORDER BY created_at DESC LIMIT 1
-        )
-        WHERE EXISTS (
-          SELECT 1 FROM ai_annotations
-          WHERE ai_annotations.entry_id = journal_entries.id
-        )
-      ''');
-      await _createCheckInTable(db);
-    }
-    if (oldVersion < 3) {
-      await _createDailyTables(db);
-      await _migrateLegacyEntries(db);
-    }
-    if (oldVersion < 4) {
-      await db.execute(
-        "ALTER TABLE day_entries ADD COLUMN entry_purpose TEXT NOT NULL DEFAULT 'freeform'",
-      );
-      await _createSmartJournalTables(db);
-      await _rebuildSearchIndex(db);
-    }
-  }
-
-  Future<void> _createCheckInTable(DatabaseExecutor db) => db.execute('''
-    CREATE TABLE IF NOT EXISTS daily_checkins (
-      date_key TEXT PRIMARY KEY,
-      mood_angle REAL NOT NULL,
-      mood_intensity REAL NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  ''');
-
-  Future<void> _createDailyTables(DatabaseExecutor db) async {
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS journal_days (
-        date_key TEXT PRIMARY KEY,
-        gratitude TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS day_entries (
-        id TEXT PRIMARY KEY,
-        date_key TEXT NOT NULL,
-        entry_type TEXT NOT NULL CHECK(entry_type IN ('daily', 'additional')),
-        title TEXT NOT NULL DEFAULT '',
-        content TEXT NOT NULL DEFAULT '',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(date_key) REFERENCES journal_days(date_key) ON DELETE CASCADE
-      )
-    ''');
-    await db.execute('''
-      CREATE UNIQUE INDEX IF NOT EXISTS one_daily_entry_per_day
-      ON day_entries(date_key) WHERE entry_type = 'daily'
-    ''');
-    await db.execute('''
-      CREATE INDEX IF NOT EXISTS day_entries_date_order
-      ON day_entries(date_key, entry_type, created_at DESC, id DESC)
-    ''');
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS app_settings (
-        setting_key TEXT PRIMARY KEY,
-        setting_value TEXT NOT NULL
-      )
-    ''');
-    await db.insert('app_settings', {
-      'setting_key': eveningSettingKey,
-      'setting_value': '${18 * 60}',
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
-    await db.insert('app_settings', {
-      'setting_key': smartOrganizationSettingKey,
-      'setting_value': 'false',
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
-    await db.insert('app_settings', {
-      'setting_key': quietTimeLoggingSettingKey,
-      'setting_value': 'false',
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
-    await db.insert('app_settings', {
-      'setting_key': preferredBibleSettingKey,
-      'setting_value': 'NIV',
-    }, conflictAlgorithm: ConflictAlgorithm.ignore);
-  }
-
-  Future<void> _createSmartJournalTables(DatabaseExecutor db) async {
-    final columns = await db.rawQuery('PRAGMA table_info(day_entries)');
-    if (!columns.any((column) => column['name'] == 'entry_purpose')) {
-      await db.execute(
-        "ALTER TABLE day_entries ADD COLUMN entry_purpose TEXT NOT NULL DEFAULT 'freeform'",
-      );
-    }
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS tags (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        normalized_name TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS entry_tags (
-        entry_id TEXT NOT NULL,
-        tag_id TEXT NOT NULL,
-        source TEXT NOT NULL CHECK(source IN ('manual', 'generated')),
-        confidence REAL,
-        created_at TEXT NOT NULL,
-        PRIMARY KEY(entry_id, tag_id),
-        FOREIGN KEY(entry_id) REFERENCES day_entries(id) ON DELETE CASCADE,
-        FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
-      )
-    ''');
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS entry_tags_tag ON entry_tags(tag_id, entry_id)',
-    );
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS entry_embeddings (
-        entry_id TEXT NOT NULL,
-        model_id TEXT NOT NULL,
-        content_hash TEXT NOT NULL,
-        dimensions INTEGER NOT NULL,
-        vector_blob BLOB NOT NULL,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY(entry_id, model_id),
-        FOREIGN KEY(entry_id) REFERENCES day_entries(id) ON DELETE CASCADE
-      )
-    ''');
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS entry_relationships (
-        source_entry_id TEXT NOT NULL,
-        target_entry_id TEXT NOT NULL,
-        score REAL NOT NULL,
-        reasons TEXT NOT NULL DEFAULT '',
-        model_id TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY(source_entry_id, target_entry_id),
-        FOREIGN KEY(source_entry_id) REFERENCES day_entries(id) ON DELETE CASCADE,
-        FOREIGN KEY(target_entry_id) REFERENCES day_entries(id) ON DELETE CASCADE
-      )
-    ''');
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS relationships_source_score ON entry_relationships(source_entry_id, score DESC)',
-    );
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS entry_scriptures (
-        id TEXT PRIMARY KEY,
-        entry_id TEXT NOT NULL,
-        source TEXT NOT NULL,
-        bible_id TEXT NOT NULL,
-        translation_abbreviation TEXT NOT NULL,
-        passage_id TEXT NOT NULL,
-        reference TEXT NOT NULL,
-        copyright TEXT NOT NULL DEFAULT '',
-        cached_text TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(entry_id) REFERENCES day_entries(id) ON DELETE CASCADE
-      )
-    ''');
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS scriptures_entry ON entry_scriptures(entry_id, created_at)',
-    );
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS quiet_time_reflections (
-        entry_id TEXT PRIMARY KEY,
-        observation TEXT NOT NULL DEFAULT '',
-        application TEXT NOT NULL DEFAULT '',
-        prayer TEXT NOT NULL DEFAULT '',
-        updated_at TEXT NOT NULL,
-        FOREIGN KEY(entry_id) REFERENCES day_entries(id) ON DELETE CASCADE
-      )
-    ''');
-    await db.execute('''
-      CREATE VIRTUAL TABLE IF NOT EXISTS entry_search USING fts5(
-        entry_id UNINDEXED,
-        date_key UNINDEXED,
-        title,
-        content,
-        gratitude,
-        tags,
-        quiet_time,
-        tokenize = 'unicode61 remove_diacritics 2'
-      )
-    ''');
-  }
-
-  Future<void> _migrateLegacyEntries(DatabaseExecutor db) async {
-    final tables = await db.rawQuery(
-      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'journal_entries'",
-    );
-    if (tables.isEmpty) return;
-
-    final rows = await db.query(
-      'journal_entries',
-      orderBy: 'created_at ASC, id ASC',
-    );
-    final latestDraftRows = await db.query(
-      'journal_entries',
-      where: "status = 'draft'",
-      orderBy: 'updated_at DESC, id DESC',
-      limit: 1,
-    );
-    final latestDraftId = latestDraftRows.firstOrNull?['id'] as String?;
-    final groups = <String, List<Map<String, Object?>>>{};
-    for (final row in rows) {
-      final content = (row['content'] as String?) ?? '';
-      if (content.trim().isEmpty && row['id'] != latestDraftId) continue;
-      final dateKey = localDateKey(
-        DateTime.parse(row['created_at']! as String),
-      );
-      groups.putIfAbsent(dateKey, () => []).add(row);
-    }
-
-    for (final group in groups.entries) {
-      final rowsForDay = group.value;
-      final firstNonEmpty = rowsForDay
-          .where(
-            ((row) => ((row['content'] as String?) ?? '').trim().isNotEmpty),
-          )
-          .firstOrNull;
-      final dailyRow = firstNonEmpty ?? rowsForDay.first;
-      final createdAt = dailyRow['created_at']! as String;
-      final updatedAt = rowsForDay.last['updated_at']! as String;
-      await db.insert('journal_days', {
-        'date_key': group.key,
-        'gratitude': '',
-        'created_at': createdAt,
-        'updated_at': updatedAt,
-      }, conflictAlgorithm: ConflictAlgorithm.ignore);
-      for (final row in rowsForDay) {
-        await db.insert('day_entries', {
-          'id': row['id'],
-          'date_key': group.key,
-          'entry_type': row['id'] == dailyRow['id']
-              ? DayEntryType.daily.name
-              : DayEntryType.additional.name,
-          'title': row['title'] ?? '',
-          'content': row['content'] ?? '',
-          'created_at': row['created_at'],
-          'updated_at': row['updated_at'],
-        }, conflictAlgorithm: ConflictAlgorithm.ignore);
-      }
-    }
-
-    final checkIns = await db.query('daily_checkins');
-    for (final checkIn in checkIns) {
-      await db.insert('journal_days', {
-        'date_key': checkIn['date_key'],
-        'gratitude': '',
-        'created_at': checkIn['created_at'],
-        'updated_at': checkIn['updated_at'],
-      }, conflictAlgorithm: ConflictAlgorithm.ignore);
-    }
-  }
-
-  Future<void> _rebuildSearchIndex(DatabaseExecutor db) async {
-    await db.delete('entry_search');
-    final rows = await db.query('day_entries', columns: ['id']);
-    for (final row in rows) {
-      await _syncSearchEntry(db, row['id']! as String);
-    }
   }
 
   Future<void> _syncSearchEntry(DatabaseExecutor db, String entryId) async {
@@ -379,14 +86,7 @@ class DatabaseService {
     final directory =
         _injectedSupportDirectory ?? await getApplicationSupportDirectory();
     await directory.create(recursive: true);
-    final path = p.join(directory.path, 'meno.sqlite');
-    final legacyPath = p.join(directory.path, 'sotto.sqlite');
-    final databaseFile = File(path);
-    if (!await databaseFile.exists() && await File(legacyPath).exists()) {
-      // Keep the legacy file as a recoverable backup during the product rename.
-      await File(legacyPath).copy(path);
-    }
-    return path;
+    return p.join(directory.path, 'meno.sqlite');
   }
 
   Future<JournalDay> ensureDay(String dateKey, {DateTime? now}) async {
@@ -477,16 +177,63 @@ class DatabaseService {
     return rows.map((row) => row['entry_id']! as String).toList();
   }
 
-  Future<List<String>> entryIdsForScripture(String passageId) async {
+  Future<Map<String, int>> tagUsageCounts() async {
     final db = await database;
-    final rows = await db.query(
-      'entry_scriptures',
-      columns: ['entry_id'],
-      where: 'passage_id = ?',
-      whereArgs: [passageId],
-      distinct: true,
+    final rows = await db.rawQuery('''
+      SELECT t.normalized_name, COUNT(et.entry_id) AS usage_count
+      FROM tags t
+      LEFT JOIN entry_tags et ON et.tag_id = t.id
+      GROUP BY t.id, t.normalized_name
+      ''');
+    return {
+      for (final row in rows)
+        row['normalized_name']! as String: row['usage_count']! as int,
+    };
+  }
+
+  Future<List<SharedTagCandidate>> sharedTagCandidates(String entryId) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT DISTINCT candidate.entry_id, t.name AS tag_name
+      FROM entry_tags source
+      JOIN entry_tags candidate ON candidate.tag_id = source.tag_id
+      JOIN tags t ON t.id = source.tag_id
+      WHERE source.entry_id = ? AND candidate.entry_id != ?
+      ''',
+      [entryId, entryId],
     );
-    return rows.map((row) => row['entry_id']! as String).toList();
+    return [
+      for (final row in rows)
+        (
+          entryId: row['entry_id']! as String,
+          tagName: row['tag_name']! as String,
+        ),
+    ];
+  }
+
+  Future<List<SharedScriptureCandidate>> sharedScriptureCandidates(
+    String entryId,
+  ) async {
+    final db = await database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT DISTINCT candidate.entry_id, source.reference
+      FROM entry_scriptures source
+      JOIN entry_scriptures candidate
+        ON candidate.bible_id = source.bible_id
+       AND candidate.passage_id = source.passage_id
+      WHERE source.entry_id = ? AND candidate.entry_id != ?
+      ''',
+      [entryId, entryId],
+    );
+    return [
+      for (final row in rows)
+        (
+          entryId: row['entry_id']! as String,
+          reference: row['reference']! as String,
+        ),
+    ];
   }
 
   Future<void> saveDayEntry(DayEntry entry) async {
@@ -1023,13 +770,11 @@ class DatabaseService {
     await db.insert('entry_scriptures', {
       'id': reference.id,
       'entry_id': reference.entryId,
-      'source': reference.source,
       'bible_id': reference.bibleId,
       'translation_abbreviation': reference.translationAbbreviation,
       'passage_id': reference.passageId,
       'reference': reference.reference,
       'copyright': reference.copyright,
-      'cached_text': reference.cachedText,
       'created_at': DateTime.now().toUtc().toIso8601String(),
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }

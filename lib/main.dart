@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'ui/editor_screen.dart';
+import 'ui/theme_primitives.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,22 +14,20 @@ class MenoApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const ink = Color(0xFF262923);
-    const paper = Color(0xFFF7F6F1);
     return MaterialApp(
       title: 'Meno',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
-        scaffoldBackgroundColor: paper,
+        scaffoldBackgroundColor: MenoTheme.appBackground,
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFFAAB6A8),
           brightness: Brightness.light,
         ),
         textTheme: ThemeData.light().textTheme.apply(
-          bodyColor: ink,
-          displayColor: ink,
-          fontFamily: 'Georgia',
+          bodyColor: MenoTheme.ink,
+          displayColor: MenoTheme.ink,
+          fontFamily: MenoTheme.serif,
         ),
       ),
       home: const EditorScreen(),
