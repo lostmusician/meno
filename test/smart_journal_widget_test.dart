@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +7,7 @@ import 'package:meno/models/journal_entry.dart';
 import 'package:meno/providers/journal_providers.dart';
 import 'package:meno/services/bible_service.dart';
 import 'package:meno/services/database_service.dart';
+import 'package:meno/services/embedding_service.dart';
 import 'package:meno/ui/editor_screen.dart';
 import 'package:meno/ui/scripture_screen.dart';
 
@@ -384,12 +387,32 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('settings can close while smart organization is starting', (
+    tester,
+  ) async {
+    final embedding = _DelayedEmbeddingService();
+    await _pumpCompletedApp(tester, embedding: embedding);
+
+    await tester.tap(find.byKey(const Key('binder-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('smart-organization-setting')));
+    await tester.pump();
+
+    Navigator.of(tester.element(find.text('Meno settings'))).pop();
+    await tester.pumpAndSettle();
+    embedding.completeDownload();
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+  });
 }
 
 Future<_Harness> _pumpCompletedApp(
   WidgetTester tester, {
   bool quietTimeLogging = false,
   TargetPlatform? platform,
+  EmbeddingService? embedding,
 }) async {
   final database = FakeDatabaseService();
   const dateKey = '2026-09-01';
@@ -410,6 +433,8 @@ Future<_Harness> _pumpCompletedApp(
     overrides: [
       databaseServiceProvider.overrideWithValue(database),
       youVersionBibleProvider.overrideWithValue(_FixtureBibleProvider()),
+      if (embedding != null)
+        embeddingServiceProvider.overrideWithValue(embedding),
     ],
   );
   await tester.pumpWidget(
@@ -490,6 +515,39 @@ class _FixtureBibleProvider extends YouVersionBibleProvider {
         content: 'In the beginning God created the heavens and the earth.',
         version: version,
       );
+}
+
+class _DelayedEmbeddingService implements EmbeddingService {
+  final _download = Completer<void>();
+
+  void completeDownload() {
+    if (!_download.isCompleted) _download.complete();
+  }
+
+  @override
+  int get dimensions => 3;
+
+  @override
+  String get modelId => 'delayed-fixture';
+
+  @override
+  Stream<EmbeddingStatus> get status => const Stream.empty();
+
+  @override
+  Future<void> close() async {}
+
+  @override
+  Future<void> deleteModel() async {}
+
+  @override
+  Future<void> downloadModel() => _download.future;
+
+  @override
+  Future<List<double>> embed(String text, {bool isQuery = false}) async =>
+      const [0, 0, 1];
+
+  @override
+  Future<bool> isAvailable() async => true;
 }
 
 class _Harness {

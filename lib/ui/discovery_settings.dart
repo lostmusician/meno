@@ -8,6 +8,8 @@ class MenoSettingsSheet extends ConsumerWidget {
     final app = ref.watch(journalControllerProvider);
     final embedding = ref.watch(embeddingServiceProvider);
     final discovery = ref.watch(discoveryControllerProvider);
+    final journalController = ref.read(journalControllerProvider.notifier);
+    final discoveryController = ref.read(discoveryControllerProvider.notifier);
     return SafeArea(
       child: SizedBox(
         height: math.min(MediaQuery.sizeOf(context).height * .82, 680),
@@ -42,11 +44,9 @@ class MenoSettingsSheet extends ConsumerWidget {
                   ),
                 );
                 if (selected != null) {
-                  await ref
-                      .read(journalControllerProvider.notifier)
-                      .updateEveningPreference(
-                        selected.hour * 60 + selected.minute,
-                      );
+                  await journalController.updateEveningPreference(
+                    selected.hour * 60 + selected.minute,
+                  );
                 }
               },
             ),
@@ -60,13 +60,9 @@ class MenoSettingsSheet extends ConsumerWidget {
               ),
               value: app.smartOrganizationEnabled,
               onChanged: (enabled) async {
-                await ref
-                    .read(journalControllerProvider.notifier)
-                    .setSmartOrganizationEnabled(enabled);
+                await journalController.setSmartOrganizationEnabled(enabled);
                 if (!enabled) {
-                  ref
-                      .read(discoveryControllerProvider.notifier)
-                      .cancelIndexing();
+                  discoveryController.cancelIndexing();
                   return;
                 }
                 try {
@@ -82,11 +78,7 @@ class MenoSettingsSheet extends ConsumerWidget {
                     );
                   }
                 }
-                unawaited(
-                  ref
-                      .read(discoveryControllerProvider.notifier)
-                      .organizeBackCatalog(),
-                );
+                unawaited(discoveryController.organizeBackCatalog());
               },
             ),
             StreamBuilder<EmbeddingStatus>(
@@ -134,9 +126,7 @@ class MenoSettingsSheet extends ConsumerWidget {
                     ),
                   ),
                   TextButton(
-                    onPressed: ref
-                        .read(discoveryControllerProvider.notifier)
-                        .cancelIndexing,
+                    onPressed: discoveryController.cancelIndexing,
                     child: const Text('Cancel'),
                   ),
                 ],
@@ -151,9 +141,7 @@ class MenoSettingsSheet extends ConsumerWidget {
                 'Create Quiet Time entries and attach Scripture when you want it.',
               ),
               value: app.quietTimeLoggingEnabled,
-              onChanged: (enabled) => ref
-                  .read(journalControllerProvider.notifier)
-                  .setQuietTimeLoggingEnabled(enabled),
+              onChanged: journalController.setQuietTimeLoggingEnabled,
             ),
             if (app.quietTimeLoggingEnabled)
               ListTile(
