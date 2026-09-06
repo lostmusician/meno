@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/journal_entry.dart';
@@ -55,6 +57,8 @@ class DiscoveryController extends StateNotifier<DiscoveryState> {
   final DatabaseService _database;
   final TaggingService _tagging;
   final RelationshipService _relationships;
+  final Map<String, int> _entryRevisions = {};
+  Future<void> _organizationQueue = Future<void>.value();
   bool _cancelled = false;
 
   Future<void> loadForDays(List<BinderDay> days) async {
@@ -129,39 +133,80 @@ class DiscoveryController extends StateNotifier<DiscoveryState> {
     );
   }
 
-  Future<void> organizeEntry(DayEntry entry) async {
-    await _tagging.organizeEntry(entry);
-    await _relationships.rebuildForEntry(entry.id);
-    await _reloadEntry(entry.id);
+  Future<void> organizeEntry(DayEntry entry) {
+    final revision = _nextRevision(entry.id);
+    return _enqueueOrganization(
+      () => _organizeEntryNow(entry, revision: revision),
+    );
   }
 
-  Future<void> organizeBackCatalog() async {
+  Future<void> organizeBackCatalog() {
     _cancelled = false;
     state = state.copyWith(
       isLoading: true,
       indexedEntries: 0,
       clearError: true,
     );
-    try {
-      await _tagging.organizeBackCatalog(
-        isCancelled: () => _cancelled,
-        onProgress: (completed, total) {
-          state = state.copyWith(
-            indexedEntries: completed,
-            totalEntries: total,
+    return _enqueueOrganization(() async {
+      try {
+        final entries = await _database.allNonEmptyEntries();
+        for (var index = 0; index < entries.length; index++) {
+          if (_cancelled) break;
+          final entry = entries[index];
+          final revision = _nextRevision(entry.id);
+          await _organizeEntryNow(
+            entry,
+            revision: revision,
+            shouldContinue: () => !_cancelled,
+            reload: false,
           );
-        },
-      );
-      if (!_cancelled) {
-        await _relationships.rebuildAll(isCancelled: () => _cancelled);
+          if (_cancelled) break;
+          state = state.copyWith(
+            indexedEntries: index + 1,
+            totalEntries: entries.length,
+          );
+          await Future<void>.delayed(Duration.zero);
+        }
+        state = state.copyWith(
+          tags: await _database.allTags(),
+          isLoading: false,
+        );
+      } catch (error) {
+        state = state.copyWith(isLoading: false, error: error);
       }
-      state = state.copyWith(tags: await _database.allTags(), isLoading: false);
-    } catch (error) {
-      state = state.copyWith(isLoading: false, error: error);
-    }
+    });
   }
 
   void cancelIndexing() => _cancelled = true;
+
+  int _nextRevision(String entryId) {
+    final revision = (_entryRevisions[entryId] ?? 0) + 1;
+    _entryRevisions[entryId] = revision;
+    return revision;
+  }
+
+  Future<void> _enqueueOrganization(Future<void> Function() operation) {
+    final result = _organizationQueue.then((_) => operation());
+    _organizationQueue = result.catchError((Object _) {});
+    return result;
+  }
+
+  Future<void> _organizeEntryNow(
+    DayEntry entry, {
+    required int revision,
+    bool Function()? shouldContinue,
+    bool reload = true,
+  }) async {
+    bool isCurrent() =>
+        _entryRevisions[entry.id] == revision &&
+        (shouldContinue?.call() ?? true);
+    if (!isCurrent()) return;
+    await _tagging.organizeEntry(entry, shouldCommit: isCurrent);
+    if (!isCurrent()) return;
+    await _relationships.rebuildForEntry(entry.id);
+    if (!isCurrent() || !reload) return;
+    await _reloadEntry(entry.id);
+  }
 
   Future<void> _reloadEntry(String entryId) async {
     state = state.copyWith(

@@ -1,15 +1,11 @@
-import 'dart:math' as math;
-
 import 'package:text_analysis/text_analysis.dart';
 
 abstract interface class KeyphraseExtractor {
   Future<List<KeyphraseCandidate>> extract({
     required String content,
     String title = '',
-    String gratitude = '',
-    Map<String, int> corpusFrequency = const {},
-    int corpusSize = 1,
-    int limit = 5,
+    List<String> supportingText = const [],
+    int limit = 12,
   });
 }
 
@@ -49,44 +45,40 @@ class RakeKeyphraseExtractor implements KeyphraseExtractor {
   Future<List<KeyphraseCandidate>> extract({
     required String content,
     String title = '',
-    String gratitude = '',
-    Map<String, int> corpusFrequency = const {},
-    int corpusSize = 1,
-    int limit = 5,
+    List<String> supportingText = const [],
+    int limit = 12,
   }) async {
     final source = [
       title,
       content,
-      gratitude,
+      ...supportingText,
     ].where((value) => value.trim().isNotEmpty).join('\n');
     if (source.trim().isEmpty || limit <= 0) return const [];
 
     final document = await TextDocument.analyze(
       sourceText: source,
-      analyzer: English.analyzer,
+      analyzer: const _ExtractiveEnglish(),
       nGramRange: NGramRange(1, 3),
     );
     final scores = <String, double>{};
     final lowerTitle = title.toLowerCase();
-    final lowerGratitude = gratitude.toLowerCase();
-    final lowerContent = content.toLowerCase();
+    final lowerSupporting = supportingText.join('\n').toLowerCase();
     for (final entry in document.keywords.keywordScores.entries) {
       final phrase = _clean(entry.key);
       if (!_isUseful(phrase)) continue;
-      final count = _occurrences(lowerContent, phrase);
-      final documentFrequency = corpusFrequency[phrase] ?? 0;
-      final rarity = math.log((corpusSize + 1) / (documentFrequency + 1)) + 1;
       final titleBoost = lowerTitle.contains(phrase) ? 1.35 : 1.0;
-      final gratitudeBoost = lowerGratitude.contains(phrase) ? 1.18 : 1.0;
-      final repetitionBoost = 1 + math.min(count - 1, 3) * .12;
+      final supportingBoost = lowerSupporting.contains(phrase) ? 1.08 : 1.0;
       final lengthBalance = phrase.split(' ').length == 1 ? .82 : 1.0;
       scores[phrase] =
-          entry.value *
-          rarity *
-          titleBoost *
-          gratitudeBoost *
-          repetitionBoost *
-          lengthBalance;
+          entry.value * titleBoost * supportingBoost * lengthBalance;
+    }
+    final titlePhrase = _clean(title);
+    if (_isUseful(titlePhrase)) {
+      final highestScore = scores.values.fold<double>(
+        0,
+        (highest, score) => score > highest ? score : highest,
+      );
+      scores[titlePhrase] = highestScore == 0 ? 1 : highestScore * 1.05;
     }
     final ranked = scores.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
@@ -117,14 +109,6 @@ class RakeKeyphraseExtractor implements KeyphraseExtractor {
     return RegExp(r'[a-z]').hasMatch(phrase);
   }
 
-  static int _occurrences(String source, String phrase) {
-    if (source.isEmpty) return 1;
-    return RegExp(
-      RegExp.escape(phrase),
-      caseSensitive: false,
-    ).allMatches(source).length.clamp(1, 4);
-  }
-
   static String _displayPhrase(String phrase, String source) {
     final match = RegExp(
       RegExp.escape(phrase),
@@ -133,4 +117,13 @@ class RakeKeyphraseExtractor implements KeyphraseExtractor {
     if (match == null) return phrase;
     return source.substring(match.start, match.end).trim();
   }
+}
+
+class _ExtractiveEnglish extends English {
+  const _ExtractiveEnglish();
+
+  @override
+  String? Function(String term) get stemmer => _preserveTerm;
+
+  static String _preserveTerm(String term) => term.toLowerCase();
 }
