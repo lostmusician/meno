@@ -322,129 +322,193 @@ class _ScriptureWorkspaceState extends ConsumerState<ScriptureWorkspace> {
   @override
   Widget build(BuildContext context) {
     final mobile = _usesMobileChrome(context);
-    final fadeOpacity = (_scrollOffset / 32).clamp(0, 1).toDouble();
     final collapseProgress = _selectorsManuallyExpanded
         ? 0.0
         : _selectorCollapseProgress;
+    final reader = _ReaderBody(
+      mobile: mobile,
+      loading: _loading,
+      error: _error,
+      scrollController: _scrollController,
+      scrollOffset: _scrollOffset,
+      book: _book,
+      chapter: _chapter,
+      results: _results,
+      selectionAnchor: _selectionAnchor,
+      selectionStart: _selectionAnchor == null ? null : _selectionStart,
+      selectionEnd: _selectionExtent == null ? null : _selectionEnd,
+      onVerseTap: _selectVerse,
+      onRetry: _initialize,
+    );
     return Material(
       color: MenoTheme.paper,
       child: SafeArea(
         top: false,
-        child: Column(
-          children: [
-            if (mobile)
-              _MobileReaderChrome(onClose: _close)
-            else
-              _ReaderHeader(
-                versions: _versions,
-                version: _version,
-                books: _books,
-                book: _book,
-                chapters: _chapters,
-                chapter: _chapter,
-                enabled: !_loading,
-                onVersionChanged: _changeVersion,
-                onBookChanged: _changeBook,
-                onChapterChanged: _changeChapter,
-                onClose: _close,
-              ),
-            if (_loading) const LinearProgressIndicator(minHeight: 2),
-            Expanded(
-              child: Stack(
+        child: mobile
+            ? Stack(
                 children: [
-                  Positioned.fill(
-                    child: _error != null
-                        ? _ReaderError(error: _error!, onRetry: _initialize)
-                        : SingleChildScrollView(
-                            key: const Key('scripture-verse-list'),
-                            controller: _scrollController,
-                            padding: EdgeInsets.fromLTRB(
-                              24,
-                              24,
-                              24,
-                              mobile ? 56 : 40,
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${_book?.name ?? ''} $_chapter'.trim(),
-                                  style: const TextStyle(
-                                    fontFamily: MenoTheme.serif,
-                                    fontSize: 26,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                                const SizedBox(height: 18),
-                                _ContinuousChapter(
-                                  passages: _results,
-                                  selectionStart: _selectionAnchor == null
-                                      ? null
-                                      : _selectionStart,
-                                  selectionEnd: _selectionExtent == null
-                                      ? null
-                                      : _selectionEnd,
-                                  onVerseTap: _selectVerse,
-                                ),
-                              ],
-                            ),
-                          ),
+                  Positioned.fill(child: reader),
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: _MobileReaderChrome(onClose: _close),
                   ),
-                  Positioned(
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    height: mobile ? 46 : 36,
-                    child: IgnorePointer(
-                      child: AnimatedOpacity(
-                        key: const Key('scripture-top-fade'),
-                        opacity: fadeOpacity,
-                        duration: MediaQuery.disableAnimationsOf(context)
-                            ? Duration.zero
-                            : MenoTheme.quickAnimation,
-                        child: const DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [MenoTheme.paper, Color(0x00FFFCF5)],
-                            ),
-                          ),
-                        ),
-                      ),
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: _MobileReaderDock(
+                      versions: _versions,
+                      version: _version,
+                      books: _books,
+                      book: _book,
+                      chapters: _chapters,
+                      chapter: _chapter,
+                      enabled: !_loading,
+                      collapseProgress: collapseProgress,
+                      selection: _selection,
+                      adding: _adding,
+                      onVersionChanged: _changeVersion,
+                      onBookChanged: _changeBook,
+                      onChapterChanged: _changeChapter,
+                      onExpand: _expandSelectors,
+                      onAdd: _selection == null || _adding
+                          ? null
+                          : _addSelection,
                     ),
                   ),
                 ],
+              )
+            : Column(
+                children: [
+                  _ReaderHeader(
+                    versions: _versions,
+                    version: _version,
+                    books: _books,
+                    book: _book,
+                    chapters: _chapters,
+                    chapter: _chapter,
+                    enabled: !_loading,
+                    onVersionChanged: _changeVersion,
+                    onBookChanged: _changeBook,
+                    onChapterChanged: _changeChapter,
+                    onClose: _close,
+                  ),
+                  Expanded(child: reader),
+                  _ScriptureActionBar(
+                    version: _version,
+                    selection: _selection,
+                    adding: _adding,
+                    onAdd: _selection == null || _adding ? null : _addSelection,
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+class _ReaderBody extends StatelessWidget {
+  const _ReaderBody({
+    required this.mobile,
+    required this.loading,
+    required this.error,
+    required this.scrollController,
+    required this.scrollOffset,
+    required this.book,
+    required this.chapter,
+    required this.results,
+    required this.selectionAnchor,
+    required this.selectionStart,
+    required this.selectionEnd,
+    required this.onVerseTap,
+    required this.onRetry,
+  });
+
+  final bool mobile;
+  final bool loading;
+  final Object? error;
+  final ScrollController scrollController;
+  final double scrollOffset;
+  final BibleBook? book;
+  final int chapter;
+  final List<BiblePassage> results;
+  final int? selectionAnchor;
+  final int? selectionStart;
+  final int? selectionEnd;
+  final ValueChanged<int> onVerseTap;
+  final Future<void> Function() onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final fadeOpacity = (scrollOffset / 32).clamp(0, 1).toDouble();
+    return Stack(
+      children: [
+        Positioned.fill(
+          child: error != null
+              ? _ReaderError(error: error!, onRetry: onRetry)
+              : SingleChildScrollView(
+                  key: const Key('scripture-verse-list'),
+                  controller: scrollController,
+                  padding: EdgeInsets.fromLTRB(
+                    24,
+                    mobile ? 66 : 24,
+                    24,
+                    mobile ? 196 : 40,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${book?.name ?? ''} $chapter'.trim(),
+                        style: const TextStyle(
+                          fontFamily: MenoTheme.serif,
+                          fontSize: 26,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      _ContinuousChapter(
+                        passages: results,
+                        selectionStart: selectionAnchor == null
+                            ? null
+                            : selectionStart,
+                        selectionEnd: selectionEnd,
+                        onVerseTap: onVerseTap,
+                      ),
+                    ],
+                  ),
+                ),
+        ),
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          height: mobile ? 58 : 36,
+          child: IgnorePointer(
+            child: AnimatedOpacity(
+              key: const Key('scripture-top-fade'),
+              opacity: fadeOpacity,
+              duration: MediaQuery.disableAnimationsOf(context)
+                  ? Duration.zero
+                  : MenoTheme.quickAnimation,
+              child: const DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [MenoTheme.paper, Color(0x00FFFCF5)],
+                  ),
+                ),
               ),
             ),
-            if (mobile)
-              _MobileReaderDock(
-                versions: _versions,
-                version: _version,
-                books: _books,
-                book: _book,
-                chapters: _chapters,
-                chapter: _chapter,
-                enabled: !_loading,
-                collapseProgress: collapseProgress,
-                selection: _selection,
-                adding: _adding,
-                onVersionChanged: _changeVersion,
-                onBookChanged: _changeBook,
-                onChapterChanged: _changeChapter,
-                onExpand: _expandSelectors,
-                onAdd: _selection == null || _adding ? null : _addSelection,
-              )
-            else
-              _ScriptureActionBar(
-                version: _version,
-                selection: _selection,
-                adding: _adding,
-                onAdd: _selection == null || _adding ? null : _addSelection,
-              ),
-          ],
+          ),
         ),
-      ),
+        if (loading)
+          Positioned(
+            top: mobile ? 42 : 0,
+            left: 0,
+            right: 0,
+            child: const LinearProgressIndicator(minHeight: 2),
+          ),
+      ],
     );
   }
 }
@@ -455,31 +519,33 @@ class _MobileReaderChrome extends StatelessWidget {
   final VoidCallback onClose;
 
   @override
-  Widget build(BuildContext context) => SizedBox(
-    height: 42,
-    child: Stack(
-      alignment: Alignment.center,
-      children: [
-        Container(
+  Widget build(BuildContext context) => Center(
+    heightFactor: 1,
+    child: Semantics(
+      button: true,
+      label: 'Close Scripture',
+      child: Tooltip(
+        message: 'Close Scripture',
+        child: GestureDetector(
           key: const Key('scripture-drag-handle'),
-          width: 38,
-          height: 5,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.outlineVariant,
-            borderRadius: BorderRadius.circular(99),
+          behavior: HitTestBehavior.translucent,
+          onTap: onClose,
+          child: SizedBox(
+            width: 72,
+            height: 42,
+            child: Center(
+              child: Container(
+                width: 38,
+                height: 5,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+              ),
+            ),
           ),
         ),
-        Positioned(
-          right: 6,
-          child: IconButton(
-            key: const Key('close-scripture'),
-            tooltip: 'Close Scripture',
-            visualDensity: VisualDensity.compact,
-            onPressed: onClose,
-            icon: const Icon(Icons.close, size: 20),
-          ),
-        ),
-      ],
+      ),
     ),
   );
 }
@@ -839,7 +905,7 @@ class _MobileReaderDock extends StatelessWidget {
         filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            color: colors.surface.withValues(alpha: .88),
+            color: colors.surface.withValues(alpha: .74),
             border: Border(
               top: BorderSide(
                 color: colors.outlineVariant.withValues(alpha: .72),

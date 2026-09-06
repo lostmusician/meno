@@ -216,13 +216,15 @@ void main() {
         ],
       );
       addTearDown(container.dispose);
+      var closed = false;
 
       await tester.pumpWidget(
         UncontrolledProviderScope(
           container: container,
-          child: const MaterialApp(
+          child: MaterialApp(
             themeMode: ThemeMode.light,
-            home: ScriptureWorkspace(),
+            theme: ThemeData(platform: TargetPlatform.iOS),
+            home: ScriptureWorkspace(onClose: () => closed = true),
           ),
         ),
       );
@@ -236,7 +238,7 @@ void main() {
       expect(find.byKey(const Key('scripture-collapsed-picker')), findsNothing);
       expect(
         tester.getTopLeft(find.byKey(const Key('scripture-book-picker'))).dy,
-        greaterThan(
+        lessThan(
           tester
               .getBottomLeft(find.byKey(const Key('scripture-verse-list')))
               .dy,
@@ -282,6 +284,10 @@ void main() {
         find.byKey(const Key('scripture-expanded-pickers')),
         findsOneWidget,
       );
+
+      expect(find.byKey(const Key('close-scripture')), findsNothing);
+      await tester.tap(find.byKey(const Key('scripture-drag-handle')));
+      expect(closed, isTrue);
     },
   );
 
