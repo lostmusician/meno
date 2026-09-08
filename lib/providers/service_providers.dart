@@ -2,16 +2,42 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/journal_entry.dart';
 import '../services/bible_service.dart';
+import '../services/backup_service.dart';
 import '../services/database_service.dart';
 import '../services/embedding_service.dart';
 import '../services/keyphrase_service.dart';
+import '../services/legacy_import_service.dart';
+import '../services/markdown_export_service.dart';
 import '../services/organization_service.dart';
+import '../services/save_coordinator.dart';
+import '../services/window_appearance_service.dart';
 
 final databaseServiceProvider = Provider<DatabaseService>((ref) {
   final service = DatabaseService();
   ref.onDispose(service.close);
   return service;
 });
+
+final windowAppearanceServiceProvider = Provider<WindowAppearanceService>(
+  (ref) => WindowAppearanceService(),
+);
+
+final saveCoordinatorProvider =
+    StateNotifierProvider<SaveCoordinator, SaveState>((ref) {
+      return SaveCoordinator();
+    });
+
+final backupServiceProvider = Provider<BackupService>(
+  (ref) => BackupService(ref.watch(databaseServiceProvider)),
+);
+
+final markdownExportServiceProvider = Provider<MarkdownExportService>(
+  (ref) => MarkdownExportService(ref.watch(databaseServiceProvider)),
+);
+
+final legacyImportServiceProvider = Provider<LegacyImportService>(
+  (ref) => LegacyImportService(ref.watch(databaseServiceProvider)),
+);
 
 final keyphraseExtractorProvider = Provider<KeyphraseExtractor>(
   (ref) => const RakeKeyphraseExtractor(),

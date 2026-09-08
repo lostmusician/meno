@@ -2,7 +2,25 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/journal_entry.dart';
 import '../services/database_service.dart';
+import '../services/save_coordinator.dart';
 import 'service_providers.dart';
+
+enum EditorTextSize {
+  small(18, 'Small'),
+  medium(21, 'Medium'),
+  large(24, 'Large');
+
+  const EditorTextSize(this.fontSize, this.label);
+
+  final double fontSize;
+  final String label;
+
+  static EditorTextSize fromSetting(String value) => switch (value) {
+    'small' => small,
+    'medium' => medium,
+    _ => large,
+  };
+}
 
 class JournalAppState {
   const JournalAppState({
@@ -17,6 +35,8 @@ class JournalAppState {
     this.smartOrganizationEnabled = false,
     this.quietTimeLoggingEnabled = false,
     this.preferredBibleId = 'NIV',
+    this.editorTextSize = EditorTextSize.large,
+    this.glassModeEnabled = false,
     this.isLoading = false,
     this.error,
   });
@@ -32,6 +52,8 @@ class JournalAppState {
   final bool smartOrganizationEnabled;
   final bool quietTimeLoggingEnabled;
   final String preferredBibleId;
+  final EditorTextSize editorTextSize;
+  final bool glassModeEnabled;
   final bool isLoading;
   final Object? error;
 
@@ -56,6 +78,8 @@ class JournalAppState {
     bool? smartOrganizationEnabled,
     bool? quietTimeLoggingEnabled,
     String? preferredBibleId,
+    EditorTextSize? editorTextSize,
+    bool? glassModeEnabled,
     bool? isLoading,
     Object? error,
     bool clearError = false,
@@ -75,15 +99,22 @@ class JournalAppState {
     quietTimeLoggingEnabled:
         quietTimeLoggingEnabled ?? this.quietTimeLoggingEnabled,
     preferredBibleId: preferredBibleId ?? this.preferredBibleId,
+    editorTextSize: editorTextSize ?? this.editorTextSize,
+    glassModeEnabled: glassModeEnabled ?? this.glassModeEnabled,
     isLoading: isLoading ?? this.isLoading,
     error: clearError ? null : error ?? this.error,
   );
 }
 
 class JournalController extends StateNotifier<JournalAppState> {
-  JournalController(this._database) : super(const JournalAppState());
+  JournalController(this._database, [SaveCoordinator? saveCoordinator])
+    : _saveCoordinator = saveCoordinator ?? SaveCoordinator(),
+      _ownsSaveCoordinator = saveCoordinator == null,
+      super(const JournalAppState());
 
   final DatabaseService _database;
+  final SaveCoordinator _saveCoordinator;
+  final bool _ownsSaveCoordinator;
   bool _continueToJournalAfterMood = false;
 
   Future<void> initialize({DateTime? now}) async {
@@ -96,7 +127,15 @@ class JournalController extends StateNotifier<JournalAppState> {
         _database.smartOrganizationEnabled(),
         _database.quietTimeLoggingEnabled(),
         _database.preferredBibleId(),
+        _database.editorTextSizePreference(),
+        _database.glassModeEnabled(),
       ]);
+      try {
+        await _database.createDailySnapshotIfNeeded(now: timestamp);
+      } catch (_) {
+        // A local snapshot is a secondary safeguard and must not prevent the
+        // journal itself from opening. The next launch retries it.
+      }
       final preference = preferences[0] as EveningPreference;
       final binderDay = await _database.loadBinderDay(dateKey);
       state = state.copyWith(
@@ -109,6 +148,8 @@ class JournalController extends StateNotifier<JournalAppState> {
         smartOrganizationEnabled: preferences[1] as bool,
         quietTimeLoggingEnabled: preferences[2] as bool,
         preferredBibleId: preferences[3] as String,
+        editorTextSize: EditorTextSize.fromSetting(preferences[4] as String),
+        glassModeEnabled: preferences[5] as bool,
         isLoading: false,
       );
       if (binderDay.isComplete) {
@@ -232,6 +273,13 @@ class JournalController extends StateNotifier<JournalAppState> {
       ],
       clearError: true,
     );
+    _saveCoordinator.schedule('entry:${updated.id}', () async {
+      if (updated.type == DayEntryType.additional && updated.isEmpty) {
+        await _database.deleteDayEntry(updated.id);
+      } else {
+        await _database.saveDayEntry(updated);
+      }
+    });
   }
 
   void updateGratitude(String gratitude, {DateTime? now}) {
@@ -243,12 +291,34 @@ class JournalController extends StateNotifier<JournalAppState> {
       ),
       clearError: true,
     );
+    final day = state.day!;
+    _saveCoordinator.schedule(
+      'gratitude:${day.dateKey}',
+      () => _database.saveDay(day),
+    );
   }
 
   Future<bool> saveCurrentEntry() async {
     final entry = state.selectedEntry;
     if (entry == null) return true;
     try {
+      final key = 'entry:${entry.id}';
+      if (_saveCoordinator.hasPending(key)) {
+        final pendingSaved = await _saveCoordinator.flush(key);
+        if (!pendingSaved) {
+          state = state.copyWith(error: _saveCoordinator.state.error);
+          return false;
+        }
+        if (entry.type == DayEntryType.additional && entry.isEmpty) {
+          state = state.copyWith(
+            entries: state.entries
+                .where((item) => item.id != entry.id)
+                .toList(),
+            selectedEntryId: state.dailyEntry?.id,
+          );
+        }
+        return true;
+      }
       if (entry.type == DayEntryType.additional && entry.isEmpty) {
         await _database.deleteDayEntry(entry.id);
         state = state.copyWith(
@@ -269,6 +339,14 @@ class JournalController extends StateNotifier<JournalAppState> {
     final day = state.day;
     if (day == null) return true;
     try {
+      final key = 'gratitude:${day.dateKey}';
+      if (_saveCoordinator.hasPending(key)) {
+        final pendingSaved = await _saveCoordinator.flush(key);
+        if (!pendingSaved) {
+          state = state.copyWith(error: _saveCoordinator.state.error);
+        }
+        return pendingSaved;
+      }
       await _database.saveDay(day);
       return true;
     } catch (error) {
@@ -333,12 +411,24 @@ class JournalController extends StateNotifier<JournalAppState> {
             updatedAt: timestamp.toUtc(),
           );
     state = state.copyWith(checkIn: checkIn, clearError: true);
+    _saveCoordinator.schedule(
+      'mood:$dateKey',
+      () => _database.saveCheckIn(checkIn),
+    );
   }
 
   Future<bool> saveMood() async {
     final checkIn = state.checkIn;
     if (checkIn == null) return true;
     try {
+      final key = 'mood:${checkIn.dateKey}';
+      if (_saveCoordinator.hasPending(key)) {
+        final pendingSaved = await _saveCoordinator.flush(key);
+        if (!pendingSaved) {
+          state = state.copyWith(error: _saveCoordinator.state.error);
+        }
+        return pendingSaved;
+      }
       await _database.saveCheckIn(checkIn);
       return true;
     } catch (error) {
@@ -399,9 +489,40 @@ class JournalController extends StateNotifier<JournalAppState> {
     );
     state = state.copyWith(preferredBibleId: bibleId);
   }
+
+  Future<void> setEditorTextSize(EditorTextSize size) async {
+    await _database.saveSetting(
+      DatabaseService.editorTextSizeSettingKey,
+      size.name,
+    );
+    state = state.copyWith(editorTextSize: size);
+  }
+
+  Future<void> setGlassModeEnabled(bool enabled) async {
+    await _database.saveSetting(
+      DatabaseService.glassModeSettingKey,
+      '$enabled',
+    );
+    state = state.copyWith(glassModeEnabled: enabled);
+  }
+
+  Future<bool> flushAll() async {
+    final saved = await _saveCoordinator.flushAll();
+    if (!saved) state = state.copyWith(error: _saveCoordinator.state.error);
+    return saved;
+  }
+
+  @override
+  void dispose() {
+    if (_ownsSaveCoordinator) _saveCoordinator.dispose();
+    super.dispose();
+  }
 }
 
 final journalControllerProvider =
     StateNotifierProvider<JournalController, JournalAppState>(
-      (ref) => JournalController(ref.watch(databaseServiceProvider)),
+      (ref) => JournalController(
+        ref.watch(databaseServiceProvider),
+        ref.watch(saveCoordinatorProvider.notifier),
+      ),
     );

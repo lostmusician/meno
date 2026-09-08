@@ -341,7 +341,7 @@ class _ScriptureWorkspaceState extends ConsumerState<ScriptureWorkspace> {
       onRetry: _initialize,
     );
     return Material(
-      color: MenoTheme.paper,
+      color: MenoSurfaces.of(context).paper,
       child: SafeArea(
         top: false,
         child: mobile
@@ -489,12 +489,15 @@ class _ReaderBody extends StatelessWidget {
               duration: MediaQuery.disableAnimationsOf(context)
                   ? Duration.zero
                   : MenoTheme.quickAnimation,
-              child: const DecoratedBox(
+              child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [MenoTheme.paper, Color(0x00FFFCF5)],
+                    colors: [
+                      MenoSurfaces.of(context).paper,
+                      const Color(0x00FFFCF5),
+                    ],
                   ),
                 ),
               ),
@@ -582,9 +585,8 @@ class _ReaderHeader extends StatelessWidget {
     decoration: BoxDecoration(
       border: Border(
         bottom: BorderSide(
-          color: Theme.of(
-            context,
-          ).colorScheme.outlineVariant.withValues(alpha: .7),
+          color: Theme.of(context).colorScheme.outlineVariant
+              .withValues(alpha: .7),
         ),
       ),
     ),
@@ -1301,7 +1303,7 @@ class _ScriptureActionBar extends StatelessWidget {
         MediaQuery.sizeOf(context).width < 360 ||
         MediaQuery.textScalerOf(context).scale(14) > 17;
     return Material(
-      color: glass ? Colors.transparent : MenoTheme.paper,
+      color: glass ? Colors.transparent : MenoSurfaces.of(context).paper,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),

@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/journal_entry.dart';
 import '../providers/journal_providers.dart';
+import 'brand_assets.dart';
 import 'discovery_screen.dart';
 import 'mood_dial.dart';
 import 'theme_primitives.dart';
@@ -249,7 +250,9 @@ class _BinderScreenState extends ConsumerState<BinderScreen>
     return Focus(
       autofocus: true,
       child: ColoredBox(
-        color: const Color(0xFFF1EEE6),
+        color: MenoSurfaces.of(context).glassMode
+            ? MenoSurfaces.of(context).page
+            : MenoTheme.binderBackground,
         child: SafeArea(
           child: Column(
             children: [
@@ -258,13 +261,25 @@ class _BinderScreenState extends ConsumerState<BinderScreen>
                 child: Row(
                   children: [
                     const Expanded(
-                      child: Text(
-                        'Your days',
-                        style: TextStyle(
-                          fontFamily: MenoTheme.serif,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      child: Row(
+                        children: [
+                          MenoBrandMark(size: 30),
+                          SizedBox(width: 11),
+                          Flexible(
+                            child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Your days',
+                                style: TextStyle(
+                                  fontFamily: MenoTheme.serif,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                     IconButton(

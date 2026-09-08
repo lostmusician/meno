@@ -217,7 +217,9 @@ class _BinderSheet extends ConsumerWidget {
               ? MenoTheme.paper
               : Color.alphaBlend(
                   accent.withValues(alpha: .12),
-                  const Color(0xD9FFFCF5),
+                  MenoSurfaces.of(context).glassMode
+                      ? MenoSurfaces.of(context).elevated
+                      : const Color(0xD9FFFCF5),
                 ),
           borderRadius: BorderRadius.circular(28),
           border: highContrast

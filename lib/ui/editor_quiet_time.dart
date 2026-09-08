@@ -12,7 +12,6 @@ class _QuietTimeFieldsState extends ConsumerState<_QuietTimeFields> {
   final _observation = TextEditingController();
   final _application = TextEditingController();
   final _prayer = TextEditingController();
-  Timer? _debounce;
   bool _loaded = false;
 
   @override
@@ -33,24 +32,22 @@ class _QuietTimeFieldsState extends ConsumerState<_QuietTimeFields> {
   }
 
   void _changed(_) {
-    _debounce?.cancel();
-    _debounce = Timer(MenoTheme.saveDebounce, () {
-      ref
-          .read(databaseServiceProvider)
-          .saveQuietTime(
-            QuietTimeReflection(
-              entryId: widget.entryId,
-              observation: _observation.text,
-              application: _application.text,
-              prayer: _prayer.text,
-            ),
-          );
-    });
+    final reflection = QuietTimeReflection(
+      entryId: widget.entryId,
+      observation: _observation.text,
+      application: _application.text,
+      prayer: _prayer.text,
+    );
+    ref
+        .read(saveCoordinatorProvider.notifier)
+        .schedule(
+          'quiet-time:${widget.entryId}',
+          () => ref.read(databaseServiceProvider).saveQuietTime(reflection),
+        );
   }
 
   @override
   void dispose() {
-    _debounce?.cancel();
     _observation.dispose();
     _application.dispose();
     _prayer.dispose();
@@ -113,8 +110,10 @@ class _ReflectionField extends StatelessWidget {
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 14),
     child: TextField(
+      key: Key('quiet-time-${label.toLowerCase()}'),
       controller: controller,
       onChanged: onChanged,
+      inputFormatters: const [SmartBulletTextInputFormatter()],
       minLines: 2,
       maxLines: 6,
       decoration: InputDecoration(

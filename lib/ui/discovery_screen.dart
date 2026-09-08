@@ -1,12 +1,17 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/journal_entry.dart';
 import '../providers/journal_providers.dart';
 import '../services/embedding_service.dart';
+import '../services/database_service.dart';
+import 'brand_assets.dart';
 import 'theme_primitives.dart';
 
 part 'discovery_settings.dart';

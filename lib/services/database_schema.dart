@@ -1,10 +1,14 @@
 import 'package:sqflite/sqflite.dart';
 
-const databaseSchemaVersion = 1;
+const databaseSchemaVersion = 2;
 const eveningSettingKey = 'evening_minutes';
 const smartOrganizationSettingKey = 'smart_organization_enabled';
 const quietTimeLoggingSettingKey = 'quiet_time_logging_enabled';
 const preferredBibleSettingKey = 'preferred_bible_id';
+const editorTextSizeSettingKey = 'editor_text_size';
+const glassModeSettingKey = 'glass_mode_enabled';
+const lastExternalBackupSettingKey = 'last_external_backup_at';
+const firstRestorePromptSettingKey = 'first_restore_prompt_shown';
 
 Future<void> createDatabaseSchema(Database db) async {
   await db.execute('''
@@ -66,6 +70,14 @@ Future<void> createDatabaseSchema(Database db) async {
   await db.insert('app_settings', {
     'setting_key': preferredBibleSettingKey,
     'setting_value': 'NIV',
+  });
+  await db.insert('app_settings', {
+    'setting_key': editorTextSizeSettingKey,
+    'setting_value': 'large',
+  });
+  await db.insert('app_settings', {
+    'setting_key': glassModeSettingKey,
+    'setting_value': 'false',
   });
   await db.execute('''
     CREATE TABLE tags (
@@ -158,4 +170,31 @@ Future<void> createDatabaseSchema(Database db) async {
       tokenize = 'unicode61 remove_diacritics 2'
     )
   ''');
+  await _createDataImportsTable(db);
 }
+
+Future<void> migrateDatabaseSchema(
+  Database db,
+  int oldVersion,
+  int newVersion,
+) async {
+  for (var version = oldVersion + 1; version <= newVersion; version++) {
+    switch (version) {
+      case 2:
+        await _createDataImportsTable(db);
+      default:
+        throw StateError(
+          'No database migration is defined for version $version.',
+        );
+    }
+  }
+}
+
+Future<void> _createDataImportsTable(DatabaseExecutor db) => db.execute('''
+  CREATE TABLE IF NOT EXISTS data_imports (
+    import_key TEXT PRIMARY KEY,
+    source_checksum TEXT NOT NULL,
+    imported_at TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT ''
+  )
+''');

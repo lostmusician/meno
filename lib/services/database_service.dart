@@ -13,6 +13,27 @@ import 'database_schema.dart' as schema;
 typedef SharedTagCandidate = ({String entryId, String tagName});
 typedef SharedScriptureCandidate = ({String entryId, String reference});
 
+class UnsupportedDatabaseVersionException implements Exception {
+  const UnsupportedDatabaseVersionException(this.found, this.supported);
+
+  final int found;
+  final int supported;
+
+  @override
+  String toString() =>
+      'This journal uses database version $found, but this version of Meno '
+      'supports up to version $supported. Install a newer Meno build.';
+}
+
+class DatabaseIntegrityException implements Exception {
+  const DatabaseIntegrityException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 class DatabaseService {
   DatabaseService({
     DatabaseFactory? factory,
@@ -27,6 +48,12 @@ class DatabaseService {
   static const smartOrganizationSettingKey = schema.smartOrganizationSettingKey;
   static const quietTimeLoggingSettingKey = schema.quietTimeLoggingSettingKey;
   static const preferredBibleSettingKey = schema.preferredBibleSettingKey;
+  static const editorTextSizeSettingKey = schema.editorTextSizeSettingKey;
+  static const glassModeSettingKey = schema.glassModeSettingKey;
+  static const lastExternalBackupSettingKey =
+      schema.lastExternalBackupSettingKey;
+  static const firstRestorePromptSettingKey =
+      schema.firstRestorePromptSettingKey;
 
   final DatabaseFactory? _injectedFactory;
   final String? _injectedPath;
@@ -35,18 +62,283 @@ class DatabaseService {
 
   Future<Database> get database => _databaseFuture ??= _open();
 
+  Future<String> get databaseFilePath async =>
+      _injectedPath ?? await _defaultPath();
+
+  Future<Directory> get supportDirectory async =>
+      _injectedSupportDirectory ?? await getApplicationSupportDirectory();
+
   Future<Database> _open() async {
     final factory = _injectedFactory ?? _platformFactory();
     final path = _injectedPath ?? await _defaultPath();
+    await _preflightExistingDatabase(factory, path);
     return factory.openDatabase(
       path,
       options: OpenDatabaseOptions(
         version: schemaVersion,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) => schema.createDatabaseSchema(db),
-        onDowngrade: onDatabaseDowngradeDelete,
+        onUpgrade: schema.migrateDatabaseSchema,
+        onDowngrade: (db, oldVersion, newVersion) =>
+            throw UnsupportedDatabaseVersionException(oldVersion, newVersion),
       ),
     );
+  }
+
+  Future<void> _preflightExistingDatabase(
+    DatabaseFactory factory,
+    String path,
+  ) async {
+    if (path == inMemoryDatabasePath || !await File(path).exists()) return;
+    final probe = await factory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(readOnly: true, singleInstance: false),
+    );
+    try {
+      await _assertIntegrity(probe);
+      final found = await probe.getVersion();
+      if (found > schemaVersion) {
+        throw UnsupportedDatabaseVersionException(found, schemaVersion);
+      }
+      if (found > 0 && found < schemaVersion) {
+        await _createPreMigrationSnapshot(
+          probe,
+          path,
+          kind: 'pre-migration-v$found-to-v$schemaVersion',
+          keep: 5,
+        );
+        return;
+      }
+    } finally {
+      if (probe.isOpen) await probe.close();
+    }
+  }
+
+  static Future<void> _assertIntegrity(DatabaseExecutor db) async {
+    final integrity = await db.rawQuery('PRAGMA integrity_check');
+    if (integrity.isEmpty || integrity.first.values.first != 'ok') {
+      throw DatabaseIntegrityException(
+        'The journal database failed its integrity check.',
+      );
+    }
+    final foreignKeys = await db.rawQuery('PRAGMA foreign_key_check');
+    if (foreignKeys.isNotEmpty) {
+      throw DatabaseIntegrityException(
+        'The journal database contains broken references.',
+      );
+    }
+  }
+
+  Future<File> createConsistentCopy(File destination) async {
+    final db = await database;
+    await _assertIntegrity(db);
+    await destination.parent.create(recursive: true);
+    if (await destination.exists()) await destination.delete();
+    final escaped = destination.path.replaceAll("'", "''");
+    await db.execute("VACUUM INTO '$escaped'");
+    return destination;
+  }
+
+  Future<File> createSnapshot({required String kind, int keep = 5}) async {
+    final path = await databaseFilePath;
+    if (path == inMemoryDatabasePath) {
+      throw StateError('Snapshots require a file-backed database.');
+    }
+    final directory = Directory(
+      p.join((await supportDirectory).path, 'Backups'),
+    );
+    await directory.create(recursive: true);
+    final timestamp = DateTime.now().toUtc().toIso8601String().replaceAll(
+      ':',
+      '-',
+    );
+    final destination = File(p.join(directory.path, '$kind-$timestamp.sqlite'));
+    await createConsistentCopy(destination);
+    await _pruneSnapshots(directory, kind, keep);
+    return destination;
+  }
+
+  Future<File?> createDailySnapshotIfNeeded({DateTime? now}) async {
+    final path = await databaseFilePath;
+    if (path == inMemoryDatabasePath || !await File(path).exists()) return null;
+    final date = (now ?? DateTime.now()).toLocal();
+    final key =
+        '${date.year.toString().padLeft(4, '0')}-'
+        '${date.month.toString().padLeft(2, '0')}-'
+        '${date.day.toString().padLeft(2, '0')}';
+    final directory = Directory(
+      p.join((await supportDirectory).path, 'Backups'),
+    );
+    await directory.create(recursive: true);
+    final existing = directory.listSync().whereType<File>().any(
+      (file) => p.basename(file.path).startsWith('daily-$key-'),
+    );
+    if (existing) return null;
+    final timestamp = DateTime.now().toUtc().toIso8601String().replaceAll(
+      ':',
+      '-',
+    );
+    final destination = File(
+      p.join(directory.path, 'daily-$key-$timestamp.sqlite'),
+    );
+    await createConsistentCopy(destination);
+    await _pruneSnapshots(directory, 'daily-', 30);
+    return destination;
+  }
+
+  Future<void> _createPreMigrationSnapshot(
+    DatabaseExecutor source,
+    String sourcePath, {
+    required String kind,
+    required int keep,
+  }) async {
+    final directory = Directory(p.join(p.dirname(sourcePath), 'Backups'));
+    await directory.create(recursive: true);
+    final timestamp = DateTime.now().toUtc().toIso8601String().replaceAll(
+      ':',
+      '-',
+    );
+    final destination = p.join(directory.path, '$kind-$timestamp.sqlite');
+    final escaped = destination.replaceAll("'", "''");
+    await source.execute("VACUUM INTO '$escaped'");
+    await _pruneSnapshots(directory, kind.split('-v').first, keep);
+  }
+
+  static Future<void> _pruneSnapshots(
+    Directory directory,
+    String prefix,
+    int keep,
+  ) async {
+    final files =
+        directory
+            .listSync()
+            .whereType<File>()
+            .where((file) => p.basename(file.path).startsWith(prefix))
+            .toList()
+          ..sort((a, b) => b.path.compareTo(a.path));
+    for (final file in files.skip(keep)) {
+      await file.delete();
+    }
+  }
+
+  Future<void> verifyIntegrity() async => _assertIntegrity(await database);
+
+  Future<File> copyRawDatabase(File destination) async {
+    final source = File(await databaseFilePath);
+    if (!await source.exists()) {
+      throw StateError('The journal database file does not exist.');
+    }
+    await destination.parent.create(recursive: true);
+    if (await destination.exists()) await destination.delete();
+    return source.copy(destination.path);
+  }
+
+  Future<Map<String, int>> recordCounts() async {
+    final db = await database;
+    const tables = <String>[
+      'journal_days',
+      'day_entries',
+      'daily_checkins',
+      'tags',
+      'entry_tags',
+      'entry_scriptures',
+      'quiet_time_reflections',
+      'app_settings',
+    ];
+    return {
+      for (final table in tables)
+        table:
+            mobile.Sqflite.firstIntValue(
+              await db.rawQuery('SELECT COUNT(*) FROM $table'),
+            ) ??
+            0,
+    };
+  }
+
+  Future<bool> shouldOfferFirstRestore() async {
+    if (await setting(firstRestorePromptSettingKey) == 'true') return false;
+    final counts = await recordCounts();
+    return (counts['day_entries'] ?? 0) == 0;
+  }
+
+  Future<void> restoreFromDatabaseFile(File source) async {
+    if (!await source.exists()) {
+      throw ArgumentError.value(
+        source.path,
+        'source',
+        'Backup database is missing.',
+      );
+    }
+    final destinationPath = await databaseFilePath;
+    if (destinationPath == inMemoryDatabasePath) {
+      throw StateError('Restore requires a file-backed database.');
+    }
+    await createSnapshot(kind: 'pre-restore', keep: 5);
+    final destination = File(destinationPath);
+    final staged = File('$destinationPath.restore-staged');
+    final rollback = File('$destinationPath.restore-rollback');
+    if (await staged.exists()) await staged.delete();
+    if (await rollback.exists()) await rollback.delete();
+    await source.copy(staged.path);
+
+    final stagedService = DatabaseService(
+      factory: _injectedFactory,
+      databasePath: staged.path,
+      supportDirectory: await supportDirectory,
+    );
+    try {
+      await stagedService.verifyIntegrity();
+      await stagedService.rebuildDerivedData();
+      await stagedService.verifyIntegrity();
+    } finally {
+      await stagedService.close();
+    }
+
+    await close();
+    try {
+      for (final suffix in const ['-wal', '-shm']) {
+        final sidecar = File('$destinationPath$suffix');
+        if (await sidecar.exists()) await sidecar.delete();
+      }
+      if (await destination.exists()) await destination.rename(rollback.path);
+      await staged.rename(destination.path);
+      await verifyIntegrity();
+      if (await rollback.exists()) await rollback.delete();
+    } catch (_) {
+      await close();
+      if (await destination.exists()) await destination.delete();
+      if (await rollback.exists()) await rollback.rename(destination.path);
+      rethrow;
+    } finally {
+      if (await staged.exists()) await staged.delete();
+    }
+  }
+
+  Future<Map<String, int>> validateCandidateDatabase(File source) async {
+    final candidate = DatabaseService(
+      factory: _injectedFactory,
+      databasePath: source.path,
+      supportDirectory: source.parent,
+    );
+    try {
+      await candidate.verifyIntegrity();
+      return await candidate.recordCounts();
+    } finally {
+      await candidate.close();
+    }
+  }
+
+  Future<void> rebuildDerivedData() async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('entry_relationships');
+      await txn.delete('entry_embeddings');
+      await txn.delete('entry_search');
+      final entries = await txn.query('day_entries', columns: ['id']);
+      for (final row in entries) {
+        await _syncSearchEntry(txn, row['id']! as String);
+      }
+    });
   }
 
   Future<void> _syncSearchEntry(DatabaseExecutor db, String entryId) async {
@@ -139,8 +431,7 @@ class DatabaseService {
       'day_entries',
       where: 'date_key = ?',
       whereArgs: [dateKey],
-      orderBy:
-          "CASE entry_type WHEN 'daily' THEN 0 ELSE 1 END, created_at DESC, id DESC",
+      orderBy: "CASE entry_type WHEN 'daily' THEN 0 ELSE 1 END, created_at DESC, id DESC",
     );
     return rows.map(DayEntry.fromMap).toList();
   }
@@ -378,6 +669,16 @@ class DatabaseService {
     final value = await setting(preferredBibleSettingKey);
     return value == null || value == 'BSB' ? 'NIV' : value;
   }
+
+  Future<String> editorTextSizePreference() async {
+    final value = await setting(editorTextSizeSettingKey);
+    return const {'small', 'medium', 'large'}.contains(value)
+        ? value!
+        : 'large';
+  }
+
+  Future<bool> glassModeEnabled() async =>
+      await setting(glassModeSettingKey) == 'true';
 
   Future<List<JournalTag>> allTags() async {
     final db = await database;
@@ -810,6 +1111,13 @@ class DatabaseService {
   Future<void> close() async {
     final pendingDatabase = _databaseFuture;
     _databaseFuture = null;
-    if (pendingDatabase != null) await (await pendingDatabase).close();
+    if (pendingDatabase != null) {
+      try {
+        await (await pendingDatabase).close();
+      } catch (_) {
+        // Opening can fail for a corrupt or newer database. There is no open
+        // handle to close in that case, and close must remain safe to call.
+      }
+    }
   }
 }

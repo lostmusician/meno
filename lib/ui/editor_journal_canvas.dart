@@ -73,7 +73,7 @@ class _JournalViewState extends State<_JournalView> {
         autofocus: true,
         child: ColoredBox(
           key: const Key('full-page-journal'),
-          color: MenoTheme.paper,
+          color: MenoSurfaces.of(context).paper,
           child: SafeArea(
             child: Stack(
               children: [
@@ -140,6 +140,9 @@ class _JournalViewState extends State<_JournalView> {
                                       autofocus: true,
                                       onTap: _resumeWriting,
                                       onChanged: (_) => widget.onEntryChanged(),
+                                      inputFormatters: const [
+                                        SmartBulletTextInputFormatter(),
+                                      ],
                                       // Keep the gratitude footer in the initial
                                       // viewport, then let this field expand with
                                       // the journal as the user writes.
@@ -150,9 +153,12 @@ class _JournalViewState extends State<_JournalView> {
                                         border: InputBorder.none,
                                         hintText: 'Start where you are…',
                                       ),
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontFamily: MenoTheme.serif,
-                                        fontSize: 24,
+                                        fontSize: widget
+                                            .state
+                                            .editorTextSize
+                                            .fontSize,
                                         height: 1.55,
                                       ),
                                     ),
@@ -172,15 +178,18 @@ class _JournalViewState extends State<_JournalView> {
                                         style: TextStyle(
                                           fontSize: 11,
                                           letterSpacing: 1.05,
-                                          color: Theme.of(
-                                            context,
-                                          ).colorScheme.onSurfaceVariant,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .onSurfaceVariant,
                                         ),
                                       ),
                                       TextField(
                                         key: const Key('gratitude-editor'),
                                         controller: widget.gratitudeController,
                                         onChanged: widget.onGratitudeChanged,
+                                        inputFormatters: const [
+                                          SmartBulletTextInputFormatter(),
+                                        ],
                                         minLines: 2,
                                         maxLines: 5,
                                         decoration: const InputDecoration(
@@ -216,14 +225,21 @@ class _JournalViewState extends State<_JournalView> {
                           : .82,
                       child: child,
                     ),
-                    child: Text(
-                      _friendlyDate(widget.state.selectedDateKey),
-                      key: const Key('floating-journal-date'),
-                      style: const TextStyle(
-                        fontFamily: MenoTheme.serif,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const MenoBrandMark(size: 21),
+                        const SizedBox(width: 8),
+                        Text(
+                          _friendlyDate(widget.state.selectedDateKey),
+                          key: const Key('floating-journal-date'),
+                          style: const TextStyle(
+                            fontFamily: MenoTheme.serif,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
