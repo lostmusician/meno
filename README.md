@@ -103,10 +103,18 @@ desktop target and pass its identifier to `flutter run -d`.
 - `lib/ui` — mood dial, full-page editor, binder, discovery, settings, and
   Scripture workspace.
 
-The unreleased app uses a clean schema version 1. A higher-version development
-database is deleted and recreated rather than migrated. Drafts autosave after
-700 ms of inactivity. Optional back-catalog indexing is cancellable and never
-blocks journal editing.
+The app uses ordered, transactional schema migrations and refuses databases
+created by a newer Meno build without modifying them. It creates daily local
+snapshots, supports checksummed `.meno-backup` archives and readable Markdown
+exports, and flushes pending edits before a normal macOS quit. Drafts autosave
+after 700 ms of inactivity; an abrupt process or power failure can lose at most
+that current debounce interval. Optional back-catalog indexing is cancellable
+and never blocks journal editing.
+
+The first trusted release uses the permanent `com.ivanchiew.meno` identity. A
+one-time bridge build using the former Sotto identity can archive and merge the
+existing `sotto.sqlite` history, then create a backup for restoration into the
+clean Meno app. The bridge never deletes either legacy source database.
 
 ## Verification
 
@@ -116,6 +124,9 @@ flutter test
 flutter build macos --debug
 flutter test integration_test/embedding_smoke_test.dart -d macos
 ```
+
+For the personal release and recovery checklist, see
+[`docs/TRUSTED_RELEASE.md`](docs/TRUSTED_RELEASE.md).
 
 The embedding smoke test downloads the model into a temporary directory,
 validates its checksum, runs native ONNX inference, and removes the temporary
