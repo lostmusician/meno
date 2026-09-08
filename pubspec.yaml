@@ -1,7 +1,7 @@
 name: meno
 description: A private, local-first daily journal and binder.
 publish_to: 'none'
-version: 1.0.0+1
+version: 0.1.0+1
 
 environment:
   sdk: ^3.11.5
@@ -19,6 +19,10 @@ dependencies:
   http: ^1.6.0
   crypto: ^3.0.7
   flutter_onnxruntime: ^1.8.4
+  archive: ^3.6.1
+  file_selector: ^1.0.3
+  package_info_plus: ^8.3.1
+  window_manager: ^0.5.1
 
 dev_dependencies:
   flutter_test:
@@ -29,3 +33,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/brand/meno-mark-sage.png
+    - assets/brand/meno-wordmark-sage.png
