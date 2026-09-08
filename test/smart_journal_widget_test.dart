@@ -388,6 +388,116 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('writing settings change journal size and persist glass mode', (
+    tester,
+  ) async {
+    final harness = await _pumpCompletedApp(
+      tester,
+      platform: TargetPlatform.macOS,
+    );
+
+    await tester.tap(find.byKey(const Key('binder-settings')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('editor-text-size-setting')), findsOneWidget);
+    expect(find.byKey(const Key('glass-mode-setting')), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('editor-text-size-setting')),
+        matching: find.text('S'),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('glass-mode-setting')));
+    await tester.pumpAndSettle();
+
+    expect(
+      harness.container.read(journalControllerProvider).editorTextSize,
+      EditorTextSize.small,
+    );
+    expect(
+      harness.container.read(journalControllerProvider).glassModeEnabled,
+      isTrue,
+    );
+    expect(
+      harness.database.settings[DatabaseService.editorTextSizeSettingKey],
+      'small',
+    );
+    expect(
+      harness.database.settings[DatabaseService.glassModeSettingKey],
+      'true',
+    );
+
+    Navigator.of(tester.element(find.text('Meno settings'))).pop();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('edit-journal')));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('journal-editor')))
+          .style
+          ?.fontSize,
+      18,
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('entry-title')))
+          .style
+          ?.fontSize,
+      19,
+    );
+  });
+
+  testWidgets('glass setting is not offered on non-macOS platforms', (
+    tester,
+  ) async {
+    await _pumpCompletedApp(tester, platform: TargetPlatform.windows);
+
+    await tester.tap(find.byKey(const Key('binder-settings')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('glass-mode-setting')), findsNothing);
+  });
+
+  testWidgets('smart bullets continue in every multiline writing field', (
+    tester,
+  ) async {
+    final harness = await _pumpCompletedApp(
+      tester,
+      quietTimeLogging: true,
+      platform: TargetPlatform.macOS,
+    );
+    await tester.tap(find.byKey(const Key('edit-journal')));
+    await tester.pumpAndSettle();
+
+    for (final key in const [Key('journal-editor'), Key('gratitude-editor')]) {
+      final field = find.byKey(key);
+      await tester.ensureVisible(field);
+      await tester.enterText(field, '- one');
+      await tester.enterText(field, '- one\n');
+      expect(tester.widget<TextField>(field).controller?.text, '- one\n- ');
+    }
+
+    await tester.tap(find.byKey(const Key('new-entry')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('new-quiet-time')));
+    await tester.pumpAndSettle();
+
+    for (final key in const [
+      Key('quiet-time-observation'),
+      Key('quiet-time-application'),
+      Key('quiet-time-prayer'),
+    ]) {
+      final field = find.byKey(key);
+      await tester.ensureVisible(field);
+      await tester.enterText(field, '- one');
+      await tester.enterText(field, '- one\n');
+      expect(tester.widget<TextField>(field).controller?.text, '- one\n- ');
+    }
+    await tester.pump(const Duration(milliseconds: 701));
+    await harness.container.read(saveCoordinatorProvider.notifier).flushAll();
+  });
+
   testWidgets('settings can close while smart organization is starting', (
     tester,
   ) async {

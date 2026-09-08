@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meno/models/journal_entry.dart';
 import 'package:meno/services/database_service.dart';
+import 'package:meno/services/database_schema.dart' as schema;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -197,7 +198,48 @@ void main() {
     ]);
   });
 
-  test('deletes and recreates a higher-version development database', () async {
+  test(
+    'migrates schema 1 transactionally after creating a safety snapshot',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('meno-migrate-');
+      addTearDown(() => directory.delete(recursive: true));
+      final path = '${directory.path}/meno.sqlite';
+      final old = await databaseFactoryFfi.openDatabase(
+        path,
+        options: OpenDatabaseOptions(
+          version: 1,
+          onCreate: (db, version) async {
+            await schema.createDatabaseSchema(db);
+            await db.execute('DROP TABLE data_imports');
+          },
+        ),
+      );
+      await old.close();
+
+      final migrated = DatabaseService(
+        factory: databaseFactoryFfi,
+        databasePath: path,
+        supportDirectory: directory,
+      );
+      addTearDown(migrated.close);
+      final opened = await migrated.database;
+
+      expect(await opened.getVersion(), DatabaseService.schemaVersion);
+      expect(
+        await opened.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='data_imports'",
+        ),
+        isNotEmpty,
+      );
+      final snapshots = Directory('${directory.path}/Backups')
+          .listSync()
+          .whereType<File>()
+          .where((file) => file.path.contains('pre-migration-v1-to-v2'));
+      expect(snapshots, hasLength(1));
+    },
+  );
+
+  test('refuses a higher-version database without deleting it', () async {
     final directory = await Directory.systemTemp.createTemp('meno-reset-');
     addTearDown(() => directory.delete(recursive: true));
     final path = '${directory.path}/development.sqlite';
@@ -207,7 +249,7 @@ void main() {
         version: 4,
         onCreate: (db, version) async {
           await db.execute('CREATE TABLE legacy_marker (value TEXT NOT NULL)');
-          await db.insert('legacy_marker', {'value': 'discard me'});
+          await db.insert('legacy_marker', {'value': 'preserve me'});
         },
       ),
     );
@@ -218,18 +260,18 @@ void main() {
       databasePath: path,
     );
     addTearDown(reset.close);
-    final reopened = await reset.database;
-    final markers = await reopened.rawQuery(
-      "SELECT name FROM sqlite_master WHERE name = 'legacy_marker'",
+    await expectLater(
+      reset.database,
+      throwsA(isA<UnsupportedDatabaseVersionException>()),
     );
-
-    expect(markers, isEmpty);
-    expect(await reopened.getVersion(), DatabaseService.schemaVersion);
-    expect(
-      await reopened.rawQuery(
-        "SELECT name FROM sqlite_master WHERE name = 'day_entries'",
-      ),
-      isNotEmpty,
+    final preserved = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(readOnly: true, singleInstance: false),
     );
+    addTearDown(preserved.close);
+    expect(await preserved.getVersion(), 4);
+    expect(await preserved.query('legacy_marker'), [
+      {'value': 'preserve me'},
+    ]);
   });
 }

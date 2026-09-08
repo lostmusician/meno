@@ -58,6 +58,7 @@ void main() {
       content: 'A quiet idea worth returning to tomorrow.',
       now: DateTime(2026, 9, 1, 16, 45),
     );
+    await controller.saveCurrentEntry();
     await tester.pumpAndSettle();
     await expectLater(
       find.byType(EditorScreen),

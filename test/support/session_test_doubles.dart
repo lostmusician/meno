@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:meno/models/journal_entry.dart';
 import 'package:meno/services/database_service.dart';
 
@@ -18,6 +20,12 @@ class FakeDatabaseService extends DatabaseService {
   };
   bool failEntrySaves = false;
   int saveDayEntryCallCount = 0;
+
+  @override
+  Future<File?> createDailySnapshotIfNeeded({DateTime? now}) async => null;
+
+  @override
+  Future<bool> shouldOfferFirstRestore() async => false;
 
   @override
   Future<JournalDay> ensureDay(String dateKey, {DateTime? now}) async =>
