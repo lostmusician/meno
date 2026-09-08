@@ -302,37 +302,31 @@ class ScriptureReference {
   const ScriptureReference({
     required this.id,
     required this.entryId,
-    required this.source,
     required this.bibleId,
     required this.translationAbbreviation,
     required this.passageId,
     required this.reference,
     required this.copyright,
-    this.cachedText,
   });
 
   factory ScriptureReference.fromMap(Map<String, Object?> map) =>
       ScriptureReference(
         id: map['id']! as String,
         entryId: map['entry_id']! as String,
-        source: map['source']! as String,
         bibleId: map['bible_id']! as String,
         translationAbbreviation: map['translation_abbreviation']! as String,
         passageId: map['passage_id']! as String,
         reference: map['reference']! as String,
         copyright: (map['copyright'] as String?) ?? '',
-        cachedText: map['cached_text'] as String?,
       );
 
   final String id;
   final String entryId;
-  final String source;
   final String bibleId;
   final String translationAbbreviation;
   final String passageId;
   final String reference;
   final String copyright;
-  final String? cachedText;
 }
 
 class BibleVersion {
@@ -340,17 +334,13 @@ class BibleVersion {
     required this.id,
     required this.abbreviation,
     required this.title,
-    required this.languageTag,
     required this.copyright,
-    this.isOffline = false,
   });
 
   final String id;
   final String abbreviation;
   final String title;
-  final String languageTag;
   final String copyright;
-  final bool isOffline;
 }
 
 class BiblePassage {

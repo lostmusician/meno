@@ -35,6 +35,15 @@ abstract interface class EmbeddingService {
   Future<void> close();
 }
 
+double cosineSimilarity(List<double> left, List<double> right) {
+  if (left.length != right.length || left.isEmpty) return 0;
+  var product = 0.0;
+  for (var index = 0; index < left.length; index++) {
+    product += left[index] * right[index];
+  }
+  return product.clamp(-1, 1);
+}
+
 class ArcticEmbeddingService implements EmbeddingService {
   ArcticEmbeddingService({http.Client? client, Directory? modelDirectory})
     : _client = client ?? http.Client(),

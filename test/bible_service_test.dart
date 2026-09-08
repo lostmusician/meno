@@ -46,7 +46,6 @@ void main() {
         'ERV',
         'NKJV',
       ]);
-      expect(versions.every((version) => !version.isOffline), isTrue);
       expect(requestedUri?.queryParametersAll['language_ranges[]'], ['en*']);
       expect(requestedUri?.queryParameters, isNot(contains('language_ranges')));
     });
@@ -109,6 +108,37 @@ void main() {
       );
     });
 
+    test('separates a chapter into individually selectable verses', () async {
+      Uri? requestedUri;
+      final provider = YouVersionBibleProvider(
+        appKey: 'fixture',
+        client: MockClient((request) async {
+          requestedUri = request.url;
+          return http.Response('''
+            {"id":"JHN.3","reference":"John 3","content":"<div class=\\"p\\"><span class=\\"yv-v\\" v=\\"16\\"></span><span class=\\"yv-vlbl\\">16</span>For God so loved the world &amp; gave.<span class=\\"yv-v\\" v=\\"17\\"></span><span class=\\"yv-vlbl\\">17</span>For God did not send his Son.</div>"}
+            ''', 200);
+        }),
+      );
+      addTearDown(provider.close);
+      const version = BibleVersion(
+        id: '111',
+        abbreviation: 'NIV',
+        title: 'New International Version',
+        copyright: 'NIV attribution',
+      );
+
+      final verses = await provider.chapterVerses(
+        version,
+        const BibleBook('JHN', 'John'),
+        3,
+      );
+
+      expect(verses.map((verse) => verse.id), ['JHN.3.16', 'JHN.3.17']);
+      expect(verses.first.reference, 'John 3:16');
+      expect(verses.first.content, 'For God so loved the world & gave.');
+      expect(requestedUri?.queryParameters['format'], 'html');
+    });
+
     test('surfaces Retry-After and preserves attribution metadata', () async {
       final rateLimited = YouVersionBibleProvider(
         appKey: 'fixture',
@@ -142,7 +172,6 @@ void main() {
         id: 'licensed',
         abbreviation: 'TEST',
         title: 'Test Bible',
-        languageTag: 'en',
         copyright: 'Licensed attribution',
       );
       final passage = await provider.passage(version, 'JHN.3.16');

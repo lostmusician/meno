@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Meno Open Loop mark</title>
+  <desc id="desc">A single, gently uneven ink line forming an open lowercase m.</desc>
+  <path
+    d="M96 340 C103 294 104 238 101 194 C99 171 111 157 128 165 C151 176 159 218 159 282 C163 231 176 184 207 178 C235 172 251 199 250 239 L249 309 C255 253 269 204 300 194 C330 185 346 211 344 253 L343 302 C342 329 352 340 373 336"
+    fill="none"
+    stroke="#262923"
+    stroke-width="42"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

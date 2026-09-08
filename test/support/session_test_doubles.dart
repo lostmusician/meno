@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:meno/models/journal_entry.dart';
 import 'package:meno/services/database_service.dart';
 
@@ -13,11 +15,17 @@ class FakeDatabaseService extends DatabaseService {
   EveningPreference preference = const EveningPreference();
   final Map<String, String> settings = {
     DatabaseService.smartOrganizationSettingKey: 'false',
-    DatabaseService.christianModeSettingKey: 'false',
+    DatabaseService.quietTimeLoggingSettingKey: 'false',
     DatabaseService.preferredBibleSettingKey: 'NIV',
   };
   bool failEntrySaves = false;
   int saveDayEntryCallCount = 0;
+
+  @override
+  Future<File?> createDailySnapshotIfNeeded({DateTime? now}) async => null;
+
+  @override
+  Future<bool> shouldOfferFirstRestore() async => false;
 
   @override
   Future<JournalDay> ensureDay(String dateKey, {DateTime? now}) async =>
@@ -122,6 +130,45 @@ class FakeDatabaseService extends DatabaseService {
 
   @override
   Future<List<JournalTag>> allTags() async => tags.values.toList();
+
+  @override
+  Future<Map<String, int>> tagUsageCounts() async => {
+    for (final tag in tags.values)
+      tag.normalizedName: entryTags.values
+          .expand((values) => values)
+          .where((value) => value.tag.id == tag.id)
+          .length,
+  };
+
+  @override
+  Future<List<SharedTagCandidate>> sharedTagCandidates(String entryId) async {
+    final sourceIds = (entryTags[entryId] ?? const [])
+        .map((value) => value.tag.id)
+        .toSet();
+    return [
+      for (final candidate in entryTags.entries)
+        if (candidate.key != entryId)
+          for (final value in candidate.value)
+            if (sourceIds.contains(value.tag.id))
+              (entryId: candidate.key, tagName: value.tag.name),
+    ];
+  }
+
+  @override
+  Future<List<SharedScriptureCandidate>> sharedScriptureCandidates(
+    String entryId,
+  ) async {
+    final source = scriptures[entryId] ?? const [];
+    return [
+      for (final candidate in scriptures.entries)
+        if (candidate.key != entryId)
+          for (final value in candidate.value)
+            for (final sourceValue in source)
+              if (value.bibleId == sourceValue.bibleId &&
+                  value.passageId == sourceValue.passageId)
+                (entryId: candidate.key, reference: sourceValue.reference),
+    ];
+  }
 
   @override
   Future<List<EntryTag>> tagsForEntry(String entryId) async =>

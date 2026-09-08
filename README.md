@@ -2,7 +2,7 @@
 
 Meno is a private, local-first journal for desktop and mobile. It combines a
 quiet full-page editor with a horizontal daily binder, optional on-device smart
-organization, and an opt-in Scripture workspace for Christian reflection.
+organization, and an optional Scripture workspace for Quiet Time journaling.
 
 Journal writing, gratitude, mood, tags, relationships, Scripture attachments,
 and preferences are stored on the device. The core journal does not require an
@@ -42,20 +42,22 @@ If the embedding model is absent or unavailable, tag extraction, full-text
 search, and shared-tag relationships continue to work. Generated tags never
 replace manual tags.
 
-## Christian Mode
+## Quiet Time logging
 
-Christian Mode is opt-in and hidden when disabled. It adds:
+Quiet Time logging is optional and hidden when disabled. It adds:
 
 - A focused choice of ESV, NIV, ERV, and NKJV through YouVersion.
-- A Scripture workspace shown beside the editor on desktop and as a full-height
-  sheet on phones.
-- Structured verse attachments and insertion at the editor cursor.
+- A continuous Scripture reader shown in a sliding split view on desktop and
+  as a draggable, near-full-height sheet on phones.
+- Single-verse and contiguous-range selection with linked, borderless verse
+  blocks below the journal text.
 - Quiet Time entries with optional Observation, Application, and Prayer fields.
 - Translation access when the app has an approved registration, the requested
   version is licensed, and the device is online.
 
 Only user-authored reflection and structured Scripture references are embedded.
-Licensed passage text is not stored in journal records.
+Licensed passage text is resolved on demand and is not stored in journal
+records.
 
 ### Optional YouVersion setup
 
@@ -86,8 +88,9 @@ desktop target and pass its identifier to `flutter run -d`.
 ## Architecture
 
 - `lib/models` — journal, discovery, embedding, and Scripture data types.
-- `lib/services/database_service.dart` — schema-v4 SQLite persistence, FTS5,
-  pagination, migrations, and local search.
+- `lib/services/database_schema.dart` — the current SQLite schema.
+- `lib/services/database_service.dart` — runtime persistence, FTS5,
+  pagination, transactions, and local search.
 - `lib/services/keyphrase_service.dart` — RAKE extraction and journal-specific
   phrase filtering.
 - `lib/services/embedding_service.dart` — model lifecycle, checksum validation,
@@ -100,11 +103,18 @@ desktop target and pass its identifier to `flutter run -d`.
 - `lib/ui` — mood dial, full-page editor, binder, discovery, settings, and
   Scripture workspace.
 
-SQLite schema version 4 preserves legacy journal and reflection data while
-adding tags, embeddings, relationships, Scripture attachments, Quiet Time
-fields, entry purposes, and a synchronized FTS5 index. Drafts autosave after
-700 ms of inactivity. Optional back-catalog indexing is cancellable and never
-blocks journal editing.
+The app uses ordered, transactional schema migrations and refuses databases
+created by a newer Meno build without modifying them. It creates daily local
+snapshots, supports checksummed `.meno-backup` archives and readable Markdown
+exports, and flushes pending edits before a normal macOS quit. Drafts autosave
+after 700 ms of inactivity; an abrupt process or power failure can lose at most
+that current debounce interval. Optional back-catalog indexing is cancellable
+and never blocks journal editing.
+
+The first trusted release uses the permanent `com.ivanchiew.meno` identity. A
+one-time bridge build using the former Sotto identity can archive and merge the
+existing `sotto.sqlite` history, then create a backup for restoration into the
+clean Meno app. The bridge never deletes either legacy source database.
 
 ## Verification
 
@@ -114,6 +124,9 @@ flutter test
 flutter build macos --debug
 flutter test integration_test/embedding_smoke_test.dart -d macos
 ```
+
+For the personal release and recovery checklist, see
+[`docs/TRUSTED_RELEASE.md`](docs/TRUSTED_RELEASE.md).
 
 The embedding smoke test downloads the model into a temporary directory,
 validates its checksum, runs native ONNX inference, and removes the temporary
@@ -133,7 +146,7 @@ Current verification status:
 
 - Journal data and analysis stay on-device.
 - Smart Organization only uses the network to download its optional model.
-- Christian Mode uses the network for explicitly selected YouVersion content.
+- Quiet Time logging uses the network for explicitly selected YouVersion content.
 - No API keys are stored in the repository.
 
 ## License

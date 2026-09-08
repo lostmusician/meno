@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meno/models/journal_entry.dart';
 import 'package:meno/providers/journal_providers.dart';
+import 'package:meno/services/database_service.dart';
 
 import 'support/session_test_doubles.dart';
 
@@ -15,6 +16,40 @@ void main() {
     expect(controller.state.phase, AppPhase.journal);
     expect(controller.state.selectedEntry?.type, DayEntryType.daily);
     expect(controller.state.selectedDateKey, localDateKey(now));
+  });
+
+  test('loads and persists writing appearance preferences', () async {
+    final database = FakeDatabaseService();
+    database.settings[DatabaseService.editorTextSizeSettingKey] = 'medium';
+    database.settings[DatabaseService.glassModeSettingKey] = 'true';
+    final controller = JournalController(database);
+
+    await controller.initialize(now: DateTime(2026, 9, 1, 10));
+
+    expect(controller.state.editorTextSize, EditorTextSize.medium);
+    expect(controller.state.glassModeEnabled, isTrue);
+
+    await controller.setEditorTextSize(EditorTextSize.small);
+    await controller.setGlassModeEnabled(false);
+
+    expect(controller.state.editorTextSize, EditorTextSize.small);
+    expect(controller.state.glassModeEnabled, isFalse);
+    expect(
+      database.settings[DatabaseService.editorTextSizeSettingKey],
+      'small',
+    );
+    expect(database.settings[DatabaseService.glassModeSettingKey], 'false');
+  });
+
+  test('invalid or missing appearance settings use safe defaults', () async {
+    final database = FakeDatabaseService();
+    database.settings[DatabaseService.editorTextSizeSettingKey] = 'huge';
+    final controller = JournalController(database);
+
+    await controller.initialize(now: DateTime(2026, 9, 1, 10));
+
+    expect(controller.state.editorTextSize, EditorTextSize.large);
+    expect(controller.state.glassModeEnabled, isFalse);
   });
 
   test('at evening opens mood first, then the missing journal', () async {

@@ -11,6 +11,11 @@ import 'keyphrase_service.dart';
 class TaggingService {
   TaggingService(this._database, this._extractor, this._embedding);
 
+  static const _candidateLimit = 12;
+  static const _tagLimit = 3;
+  static const _semanticReuseThreshold = .90;
+  static const _semanticDiversityThreshold = .88;
+
   final DatabaseService _database;
   final KeyphraseExtractor _extractor;
   final EmbeddingService _embedding;
@@ -21,102 +26,277 @@ class TaggingService {
   Future<void> mergeTags(String sourceTagId, String targetTagId) =>
       _database.mergeTags(sourceTagId, targetTagId);
 
-  Future<List<EntryTag>> organizeEntry(DayEntry entry) async {
+  Future<List<EntryTag>> organizeEntry(
+    DayEntry entry, {
+    bool Function()? shouldCommit,
+  }) async {
     if (entry.isEmpty) {
-      await _database.replaceGeneratedTags(entry.id, const []);
+      if (shouldCommit?.call() ?? true) {
+        await _database.replaceGeneratedTags(entry.id, const []);
+      }
       return _database.tagsForEntry(entry.id);
     }
-    final day = await _database.journalDay(entry.dateKey);
-    final tags = await _database.allTags();
-    final frequency = <String, int>{};
-    for (final tag in tags) {
-      frequency[tag.normalizedName] = (await _database.entryIdsForTag(
-        tag.id,
-      )).length;
-    }
+    final document = await _documentFor(entry);
     final entries = await _database.allNonEmptyEntries();
     final candidates = await _extractor.extract(
       content: entry.content,
       title: entry.title,
-      gratitude: entry.type == DayEntryType.daily ? day?.gratitude ?? '' : '',
-      corpusFrequency: frequency,
-      corpusSize: math.max(entries.length, 1),
+      supportingText: document.supportingText,
+      limit: _candidateLimit,
     );
-    final canonical = await _canonicalize(candidates, tags);
+    final ranked = await _rankCandidates(candidates, document, entries);
+    final canonical = await _canonicalize(ranked, await _database.allTags());
+    if (!(shouldCommit?.call() ?? true)) {
+      return _database.tagsForEntry(entry.id);
+    }
     await _database.replaceGeneratedTags(
       entry.id,
       canonical
-          .map((candidate) => (candidate.phrase, candidate.score))
+          .map((candidate) => (candidate.candidate.phrase, candidate.score))
           .toList(),
     );
     return _database.tagsForEntry(entry.id);
   }
 
-  Future<List<KeyphraseCandidate>> _canonicalize(
+  Future<_TaggingDocument> _documentFor(DayEntry entry) async {
+    final day = entry.type == DayEntryType.daily
+        ? await _database.journalDay(entry.dateKey)
+        : null;
+    final quietTime = entry.purpose == EntryPurpose.quietTime
+        ? await _database.quietTimeForEntry(entry.id)
+        : null;
+    final supportingText = [
+      day?.gratitude ?? '',
+      quietTime?.observation ?? '',
+      quietTime?.application ?? '',
+      quietTime?.prayer ?? '',
+    ].where((text) => text.trim().isNotEmpty).toList();
+    final sections = [
+      if (entry.title.trim().isNotEmpty) 'Title: ${entry.title.trim()}',
+      if (entry.content.trim().isNotEmpty) 'Journal: ${entry.content.trim()}',
+      if ((day?.gratitude ?? '').trim().isNotEmpty)
+        'Gratitude: ${day!.gratitude.trim()}',
+      if ((quietTime?.observation ?? '').trim().isNotEmpty)
+        'Observation: ${quietTime!.observation.trim()}',
+      if ((quietTime?.application ?? '').trim().isNotEmpty)
+        'Application: ${quietTime!.application.trim()}',
+      if ((quietTime?.prayer ?? '').trim().isNotEmpty)
+        'Prayer: ${quietTime!.prayer.trim()}',
+    ];
+    return _TaggingDocument(
+      title: entry.title,
+      supportingText: supportingText,
+      semanticText: sections.join('\n\n'),
+    );
+  }
+
+  Future<List<_RankedCandidate>> _rankCandidates(
     List<KeyphraseCandidate> candidates,
+    _TaggingDocument document,
+    List<DayEntry> corpus,
+  ) async {
+    if (candidates.isEmpty) return const [];
+    final contextSignals = {
+      for (final candidate in candidates)
+        candidate.phrase: _contextSignal(candidate.phrase, document, corpus),
+    };
+    try {
+      if (!await _embedding.isAvailable()) {
+        return _fallbackCandidates(candidates, document, contextSignals);
+      }
+      final documentVector = await _embedding.embed(document.semanticText);
+      final ranked = <_RankedCandidate>[];
+      for (final candidate in candidates) {
+        final vector = await _embedding.embed(candidate.phrase, isQuery: true);
+        final semantic = cosineSimilarity(
+          documentVector,
+          vector,
+        ).clamp(0.0, 1.0);
+        final score =
+            .70 * semantic +
+            .20 * candidate.score +
+            .10 * contextSignals[candidate.phrase]!;
+        ranked.add(
+          _RankedCandidate(candidate: candidate, score: score, vector: vector),
+        );
+      }
+      ranked.sort((left, right) => right.score.compareTo(left.score));
+      final bestScore = ranked.first.score;
+      final minimumScore = math.max(.50, bestScore - .20);
+      return _diverseCandidates(
+        ranked.where((candidate) => candidate.score >= minimumScore),
+      );
+    } catch (_) {
+      return _fallbackCandidates(candidates, document, contextSignals);
+    }
+  }
+
+  List<_RankedCandidate> _fallbackCandidates(
+    List<KeyphraseCandidate> candidates,
+    _TaggingDocument document,
+    Map<String, double> contextSignals,
+  ) {
+    final ranked =
+        candidates
+            .where(
+              (candidate) =>
+                  candidate.score >= .60 &&
+                  (_containsPhrase(document.title, candidate.phrase) ||
+                      candidate.phrase.trim().split(RegExp(r'\s+')).length > 1),
+            )
+            .map(
+              (candidate) => _RankedCandidate(
+                candidate: candidate,
+                score:
+                    .85 * candidate.score +
+                    .15 * contextSignals[candidate.phrase]!,
+              ),
+            )
+            .toList()
+          ..sort((left, right) => right.score.compareTo(left.score));
+    return _diverseCandidates(ranked);
+  }
+
+  List<_RankedCandidate> _diverseCandidates(Iterable<_RankedCandidate> ranked) {
+    final selected = <_RankedCandidate>[];
+    for (final candidate in ranked) {
+      final redundant = selected.any((existing) {
+        if (_phrasesOverlap(
+          existing.candidate.phrase,
+          candidate.candidate.phrase,
+        )) {
+          return true;
+        }
+        final left = existing.vector;
+        final right = candidate.vector;
+        return left != null &&
+            right != null &&
+            cosineSimilarity(left, right) >= _semanticDiversityThreshold;
+      });
+      if (!redundant) selected.add(candidate);
+      if (selected.length == _tagLimit) break;
+    }
+    return selected;
+  }
+
+  double _contextSignal(
+    String phrase,
+    _TaggingDocument document,
+    List<DayEntry> corpus,
+  ) {
+    final sourceSignal = _containsPhrase(document.title, phrase)
+        ? 1.0
+        : document.supportingText.any((text) => _containsPhrase(text, phrase))
+        ? .70
+        : .55;
+    final corpusSize = math.max(corpus.length, 1);
+    final documentFrequency = corpus
+        .where(
+          (entry) =>
+              _containsPhrase('${entry.title}\n${entry.content}', phrase),
+        )
+        .length;
+    final rarity =
+        (math.log((corpusSize + 1) / (documentFrequency + 1)) + 1) /
+        (math.log(corpusSize + 1) + 1);
+    return (.60 * sourceSignal + .40 * rarity).clamp(0, 1);
+  }
+
+  bool _containsPhrase(String source, String phrase) {
+    final normalizedSource = ' ${normalizeTagName(source)} ';
+    final normalizedPhrase = normalizeTagName(phrase);
+    return normalizedPhrase.isNotEmpty &&
+        normalizedSource.contains(' $normalizedPhrase ');
+  }
+
+  bool _phrasesOverlap(String left, String right) {
+    final leftWords = normalizeTagName(left).split(' ').toSet();
+    final rightWords = normalizeTagName(right).split(' ').toSet();
+    return leftWords.containsAll(rightWords) ||
+        rightWords.containsAll(leftWords);
+  }
+
+  Future<List<_RankedCandidate>> _canonicalize(
+    List<_RankedCandidate> candidates,
     List<JournalTag> existingTags,
   ) async {
     if (candidates.isEmpty || existingTags.isEmpty) return candidates;
     try {
-      if (!await _embedding.isAvailable()) return candidates;
+      if (!await _embedding.isAvailable() ||
+          candidates.every((candidate) => candidate.vector == null)) {
+        return candidates;
+      }
       final tagVectors = <JournalTag, List<double>>{};
       for (final tag in existingTags) {
         tagVectors[tag] = await _embedding.embed(tag.name);
       }
-      final canonical = <KeyphraseCandidate>[];
+      final canonical = <_RankedCandidate>[];
+      final usedNames = <String>{};
       for (final candidate in candidates) {
-        final normalized = normalizeTagName(candidate.phrase);
+        final normalized = normalizeTagName(candidate.candidate.phrase);
         final exact = existingTags
             .where((tag) => tag.normalizedName == normalized)
             .firstOrNull;
         if (exact != null) {
-          canonical.add(KeyphraseCandidate(exact.name, candidate.score));
+          if (usedNames.add(exact.normalizedName)) {
+            canonical.add(candidate.withPhrase(exact.name));
+          }
           continue;
         }
-        final vector = await _embedding.embed(candidate.phrase);
         JournalTag? closest;
         var closestScore = .0;
         for (final tag in existingTags) {
-          final similarity = _cosine(vector, tagVectors[tag]!);
+          final similarity = cosineSimilarity(
+            candidate.vector!,
+            tagVectors[tag]!,
+          );
           if (similarity > closestScore) {
             closest = tag;
             closestScore = similarity;
           }
         }
-        canonical.add(
-          KeyphraseCandidate(
-            closestScore >= .9 ? closest!.name : candidate.phrase,
-            candidate.score,
-          ),
-        );
+        final phrase = closestScore >= _semanticReuseThreshold
+            ? closest!.name
+            : candidate.candidate.phrase;
+        if (usedNames.add(normalizeTagName(phrase))) {
+          canonical.add(candidate.withPhrase(phrase));
+        }
       }
       return canonical;
     } catch (_) {
       return candidates;
     }
   }
+}
 
-  double _cosine(List<double> left, List<double> right) {
-    if (left.length != right.length || left.isEmpty) return 0;
-    var score = 0.0;
-    for (var index = 0; index < left.length; index++) {
-      score += left[index] * right[index];
-    }
-    return score.clamp(-1, 1);
-  }
+class _TaggingDocument {
+  const _TaggingDocument({
+    required this.title,
+    required this.supportingText,
+    required this.semanticText,
+  });
 
-  Future<void> organizeBackCatalog({
-    bool Function()? isCancelled,
-    void Function(int completed, int total)? onProgress,
-  }) async {
-    final entries = await _database.allNonEmptyEntries();
-    for (var index = 0; index < entries.length; index++) {
-      if (isCancelled?.call() ?? false) return;
-      await organizeEntry(entries[index]);
-      onProgress?.call(index + 1, entries.length);
-      await Future<void>.delayed(Duration.zero);
-    }
-  }
+  final String title;
+  final List<String> supportingText;
+  final String semanticText;
+}
+
+class _RankedCandidate {
+  const _RankedCandidate({
+    required this.candidate,
+    required this.score,
+    this.vector,
+  });
+
+  final KeyphraseCandidate candidate;
+  final double score;
+  final List<double>? vector;
+
+  _RankedCandidate withPhrase(String phrase) => _RankedCandidate(
+    candidate: KeyphraseCandidate(phrase, candidate.score),
+    score: score,
+    vector: vector,
+  );
 }
 
 class RelationshipService {
@@ -131,12 +311,8 @@ class RelationshipService {
     if (source == null) return const [];
     final sourceTags = await _database.tagsForEntry(entryId);
     final shared = <String, Set<String>>{};
-    for (final entryTag in sourceTags) {
-      final entryIds = await _database.entryIdsForTag(entryTag.tag.id);
-      for (final candidateId in entryIds) {
-        if (candidateId == entryId) continue;
-        shared.putIfAbsent(candidateId, () => {}).add(entryTag.tag.name);
-      }
+    for (final candidate in await _database.sharedTagCandidates(entryId)) {
+      shared.putIfAbsent(candidate.entryId, () => {}).add(candidate.tagName);
     }
     final scores = <String, double>{};
     final reasons = <String, List<String>>{};
@@ -147,18 +323,13 @@ class RelationshipService {
           .map((tag) => 'Shared tag: $tag')
           .toList();
     }
-    final scriptures = await _database.scripturesForEntry(entryId);
-    for (final scripture in scriptures) {
-      final candidateIds = await _database.entryIdsForScripture(
-        scripture.passageId,
-      );
-      for (final candidateId in candidateIds) {
-        if (candidateId == entryId) continue;
-        scores[candidateId] = (scores[candidateId] ?? 0) + .15;
-        reasons
-            .putIfAbsent(candidateId, () => [])
-            .add('Shared Scripture: ${scripture.reference}');
-      }
+    for (final candidate in await _database.sharedScriptureCandidates(
+      entryId,
+    )) {
+      scores[candidate.entryId] = (scores[candidate.entryId] ?? 0) + .15;
+      reasons
+          .putIfAbsent(candidate.entryId, () => [])
+          .add('Shared Scripture: ${candidate.reference}');
     }
 
     var usedEmbeddings = false;
@@ -169,14 +340,17 @@ class RelationshipService {
         for (final candidate in entries) {
           if (candidate.id == entryId) continue;
           final candidateVectors = await _embeddingsFor(candidate);
-          final wholeSimilarity = _cosine(
+          final wholeSimilarity = cosineSimilarity(
             sourceVectors.first,
             candidateVectors.first,
           );
           var chunkMaximum = wholeSimilarity;
           for (final left in sourceVectors) {
             for (final right in candidateVectors) {
-              chunkMaximum = math.max(chunkMaximum, _cosine(left, right));
+              chunkMaximum = math.max(
+                chunkMaximum,
+                cosineSimilarity(left, right),
+              );
             }
           }
           final similarity = .65 * wholeSimilarity + .35 * chunkMaximum;
@@ -265,15 +439,6 @@ class RelationshipService {
       vector: representations.expand((vector) => vector).toList(),
     );
     return representations;
-  }
-
-  double _cosine(List<double> left, List<double> right) {
-    if (left.length != right.length || left.isEmpty) return 0;
-    var product = 0.0;
-    for (var index = 0; index < left.length; index++) {
-      product += left[index] * right[index];
-    }
-    return product.clamp(-1, 1);
   }
 
   Future<void> rebuildAll({

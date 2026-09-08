@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meno/models/journal_entry.dart';
 import 'package:meno/services/database_service.dart';
+import 'package:meno/services/database_schema.dart' as schema;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
@@ -131,111 +132,146 @@ void main() {
     expect(page.single.checkIn, isNotNull);
   });
 
-  test('copies the legacy Sotto database into Meno on first launch', () async {
-    final directory = await Directory.systemTemp.createTemp(
-      'meno-database-rename-',
-    );
-    addTearDown(() => directory.delete(recursive: true));
-    final legacy = DatabaseService(
-      factory: databaseFactoryFfi,
-      databasePath: '${directory.path}/sotto.sqlite',
-    );
-    await legacy.saveDay(
-      JournalDay.empty('2026-09-02').copyWith(gratitude: 'A preserved entry.'),
-    );
-    await legacy.close();
-
-    final renamed = DatabaseService(
-      factory: databaseFactoryFfi,
-      supportDirectory: directory,
-    );
-    addTearDown(renamed.close);
+  test('creates the current schema without legacy Scripture columns', () async {
+    final db = await database.database;
+    final columns = await db.rawQuery('PRAGMA table_info(entry_scriptures)');
 
     expect(
-      (await renamed.journalDay('2026-09-02'))?.gratitude,
-      'A preserved entry.',
+      columns.map((column) => column['name']),
+      containsAll(<String>[
+        'bible_id',
+        'translation_abbreviation',
+        'passage_id',
+        'reference',
+        'copyright',
+      ]),
     );
-    expect(await File('${directory.path}/sotto.sqlite').exists(), isTrue);
-    expect(await File('${directory.path}/meno.sqlite').exists(), isTrue);
+    expect(columns.map((column) => column['name']), isNot(contains('source')));
+    expect(
+      columns.map((column) => column['name']),
+      isNot(contains('cached_text')),
+    );
+    expect(
+      await database.setting(DatabaseService.quietTimeLoggingSettingKey),
+      'false',
+    );
+  });
+
+  test('batches shared tag and Scripture candidate lookup', () async {
+    const dateKey = '2026-09-01';
+    final source = DayEntry.empty(
+      dateKey: dateKey,
+      type: DayEntryType.daily,
+    ).copyWith(content: 'Source');
+    final candidate = DayEntry.empty(
+      dateKey: dateKey,
+      type: DayEntryType.additional,
+    ).copyWith(content: 'Candidate');
+    await database.saveDayEntry(source);
+    await database.saveDayEntry(candidate);
+    final tag = await database.ensureTag('Prayer');
+    for (final entry in [source, candidate]) {
+      await database.attachTag(
+        entryId: entry.id,
+        tag: tag,
+        source: EntryTagSource.manual,
+      );
+      await database.saveScripture(
+        ScriptureReference(
+          id: 'scripture-${entry.id}',
+          entryId: entry.id,
+          bibleId: '111',
+          translationAbbreviation: 'NIV',
+          passageId: 'JHN.3.16',
+          reference: 'John 3:16',
+          copyright: 'Licensed attribution',
+        ),
+      );
+    }
+
+    expect(await database.tagUsageCounts(), {'prayer': 2});
+    expect(await database.sharedTagCandidates(source.id), [
+      (entryId: candidate.id, tagName: 'Prayer'),
+    ]);
+    expect(await database.sharedScriptureCandidates(source.id), [
+      (entryId: candidate.id, reference: 'John 3:16'),
+    ]);
   });
 
   test(
-    'migrates v2 entries into separate day entries and preserves legacy rows',
+    'migrates schema 1 transactionally after creating a safety snapshot',
     () async {
-      final directory = await Directory.systemTemp.createTemp('meno-v3-');
+      final directory = await Directory.systemTemp.createTemp('meno-migrate-');
       addTearDown(() => directory.delete(recursive: true));
-      final path = '${directory.path}/legacy.sqlite';
-      final legacy = await databaseFactoryFfi.openDatabase(
+      final path = '${directory.path}/meno.sqlite';
+      final old = await databaseFactoryFfi.openDatabase(
         path,
         options: OpenDatabaseOptions(
-          version: 2,
+          version: 1,
           onCreate: (db, version) async {
-            await db.execute('''
-            CREATE TABLE journal_entries (
-              id TEXT PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL,
-              created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-              target_word_count INTEGER NOT NULL DEFAULT 500,
-              status TEXT NOT NULL DEFAULT 'draft', closed_at TEXT,
-              reflection_question TEXT, reflection_reply TEXT NOT NULL DEFAULT ''
-            )
-          ''');
-            await db.execute('''
-            CREATE TABLE ai_annotations (
-              id TEXT PRIMARY KEY, entry_id TEXT NOT NULL, question TEXT NOT NULL,
-              anchor_offset INTEGER NOT NULL, created_at TEXT NOT NULL
-            )
-          ''');
-            await db.execute('''
-            CREATE TABLE daily_checkins (
-              date_key TEXT PRIMARY KEY, mood_angle REAL NOT NULL,
-              mood_intensity REAL NOT NULL, created_at TEXT NOT NULL,
-              updated_at TEXT NOT NULL
-            )
-          ''');
+            await schema.createDatabaseSchema(db);
+            await db.execute('DROP TABLE data_imports');
           },
         ),
       );
-      final morning = DateTime(2026, 9, 1, 2).toUtc().toIso8601String();
-      final evening = DateTime(2026, 9, 1, 11).toUtc().toIso8601String();
-      await legacy.insert(
-        'journal_entries',
-        _legacyRow('first', 'Morning', morning),
-      );
-      await legacy.insert(
-        'journal_entries',
-        _legacyRow('second', 'Evening', evening),
-      );
-      await legacy.close();
+      await old.close();
 
       final migrated = DatabaseService(
         factory: databaseFactoryFfi,
         databasePath: path,
+        supportDirectory: directory,
       );
-      final dateKey = localDateKey(DateTime.parse(morning));
-      final day = await migrated.loadBinderDay(dateKey);
-      final legacyRows = await (await migrated.database).rawQuery(
-        'SELECT count(*) AS total FROM journal_entries',
-      );
-      final legacyCount = legacyRows.single['total'] as int;
+      addTearDown(migrated.close);
+      final opened = await migrated.database;
 
-      expect(day.dailyEntry?.id, 'first');
-      expect(day.additionalEntries.single.id, 'second');
-      expect(legacyCount, 2);
-      await migrated.close();
+      expect(await opened.getVersion(), DatabaseService.schemaVersion);
+      expect(
+        await opened.rawQuery(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='data_imports'",
+        ),
+        isNotEmpty,
+      );
+      final snapshots = Directory('${directory.path}/Backups')
+          .listSync()
+          .whereType<File>()
+          .where((file) => file.path.contains('pre-migration-v1-to-v2'));
+      expect(snapshots, hasLength(1));
     },
   );
-}
 
-Map<String, Object?> _legacyRow(String id, String content, String timestamp) =>
-    {
-      'id': id,
-      'title': 'Untitled entry',
-      'content': content,
-      'created_at': timestamp,
-      'updated_at': timestamp,
-      'target_word_count': 500,
-      'status': 'closed',
-      'closed_at': timestamp,
-      'reflection_question': 'Legacy question?',
-      'reflection_reply': '',
-    };
+  test('refuses a higher-version database without deleting it', () async {
+    final directory = await Directory.systemTemp.createTemp('meno-reset-');
+    addTearDown(() => directory.delete(recursive: true));
+    final path = '${directory.path}/development.sqlite';
+    final old = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 4,
+        onCreate: (db, version) async {
+          await db.execute('CREATE TABLE legacy_marker (value TEXT NOT NULL)');
+          await db.insert('legacy_marker', {'value': 'preserve me'});
+        },
+      ),
+    );
+    await old.close();
+
+    final reset = DatabaseService(
+      factory: databaseFactoryFfi,
+      databasePath: path,
+    );
+    addTearDown(reset.close);
+    await expectLater(
+      reset.database,
+      throwsA(isA<UnsupportedDatabaseVersionException>()),
+    );
+    final preserved = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(readOnly: true, singleInstance: false),
+    );
+    addTearDown(preserved.close);
+    expect(await preserved.getVersion(), 4);
+    expect(await preserved.query('legacy_marker'), [
+      {'value': 'preserve me'},
+    ]);
+  });
+}

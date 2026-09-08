@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -5,6 +7,7 @@ import 'package:meno/models/journal_entry.dart';
 import 'package:meno/providers/journal_providers.dart';
 import 'package:meno/services/bible_service.dart';
 import 'package:meno/services/database_service.dart';
+import 'package:meno/services/embedding_service.dart';
 import 'package:meno/ui/editor_screen.dart';
 import 'package:meno/ui/scripture_screen.dart';
 
@@ -40,15 +43,21 @@ void main() {
   });
 
   testWidgets(
-    'Christian Mode creates Quiet Time and attaches licensed Scripture',
+    'Quiet Time logging creates entries and attaches licensed Scripture',
     (tester) async {
-      final harness = await _pumpCompletedApp(tester, christianMode: true);
+      final harness = await _pumpCompletedApp(
+        tester,
+        quietTimeLogging: true,
+        platform: TargetPlatform.macOS,
+      );
 
       await tester.tap(find.byKey(const Key('edit-journal')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('new-quiet-time')), findsOneWidget);
-      expect(find.byKey(const Key('open-scripture')), findsOneWidget);
+      expect(find.byKey(const Key('new-entry')), findsOneWidget);
+      expect(find.byKey(const Key('open-scripture')), findsNothing);
 
+      await tester.tap(find.byKey(const Key('new-entry')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('new-quiet-time')));
       await tester.pumpAndSettle();
       expect(
@@ -61,12 +70,22 @@ void main() {
       expect(find.text('Observation'), findsOneWidget);
       expect(find.byKey(const Key('gratitude-editor')), findsNothing);
 
-      await tester.tap(find.byKey(const Key('open-scripture')));
+      await tester.ensureVisible(find.byKey(const Key('attach-scripture')));
+      await tester.tap(find.byKey(const Key('attach-scripture')));
       await tester.pumpAndSettle();
-      expect(find.text('Scripture'), findsOneWidget);
-      await tester.tap(find.text('Genesis 1:1'));
+      expect(find.byKey(const Key('desktop-scripture-panel')), findsOneWidget);
+      expect(find.byKey(const Key('scripture-verse-list')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('scripture-verse-GEN.1.2')),
+        findsOneWidget,
+      );
+      final journalTextBefore = tester
+          .widget<TextField>(find.byKey(const Key('journal-editor')))
+          .controller!
+          .text;
+      await tester.tap(find.byKey(const ValueKey('scripture-verse-GEN.1.1')));
       await tester.pump();
-      await tester.tap(find.text('Attach verse'));
+      await tester.tap(find.byKey(const Key('add-scripture-to-journal')));
       await tester.pumpAndSettle();
 
       final entryId = harness.container
@@ -74,10 +93,242 @@ void main() {
           .selectedEntryId!;
       final references = await harness.database.scripturesForEntry(entryId);
       expect(references.single.reference, 'Genesis 1:1');
-      expect(references.single.cachedText, isNull);
-      expect(find.text('Genesis 1:1'), findsOneWidget);
+      expect(find.text('Genesis 1:1 · NIV'), findsOneWidget);
+      expect(find.byKey(const Key('linked-scripture-text')), findsOneWidget);
+      expect(find.byKey(const Key('scripture-verse-list')), findsOneWidget);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('journal-editor')))
+            .controller!
+            .text,
+        journalTextBefore,
+      );
     },
   );
+
+  testWidgets('Scripture reader selects a contiguous verse range', (
+    tester,
+  ) async {
+    ScriptureSelection? addedSelection;
+    final container = ProviderContainer(
+      overrides: [
+        youVersionBibleProvider.overrideWithValue(_FixtureBibleProvider()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          home: Scaffold(
+            body: ScriptureWorkspace(
+              onAdd: (selection) async => addedSelection = selection,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('scripture-verse-GEN.1.1')));
+    await tester.tap(find.byKey(const ValueKey('scripture-verse-GEN.1.2')));
+    await tester.pump();
+
+    expect(find.text('Genesis 1:1–2'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const Key('add-scripture-to-journal')),
+          )
+          .onPressed,
+      isNotNull,
+    );
+    await tester.tap(find.byKey(const Key('add-scripture-to-journal')));
+    await tester.pump();
+    expect(addedSelection?.passageId, 'GEN.1.1-GEN.1.2');
+    expect(addedSelection?.reference, 'Genesis 1:1–2');
+
+    await tester.tap(find.byKey(const ValueKey('scripture-verse-GEN.1.1')));
+    await tester.pump();
+    expect(find.text('Genesis 1:1'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('scripture-verse-GEN.1.1')));
+    await tester.pump();
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const Key('add-scripture-to-journal')),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('scripture-verse-GEN.1.2')));
+    await tester.tap(find.byKey(const ValueKey('scripture-verse-GEN.1.1')));
+    await tester.pump();
+    expect(find.text('Genesis 1:1–2'), findsOneWidget);
+  });
+
+  testWidgets('mobile Scripture sheet closes after adding a linked verse', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(390, 844);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final harness = await _pumpCompletedApp(
+      tester,
+      quietTimeLogging: true,
+      platform: TargetPlatform.iOS,
+    );
+
+    await tester.tap(find.byKey(const Key('edit-journal')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('new-entry')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('new-quiet-time')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('attach-scripture')));
+    await tester.tap(find.byKey(const Key('attach-scripture')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DraggableScrollableSheet), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('scripture-verse-GEN.1.2')));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('add-scripture-to-journal')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(DraggableScrollableSheet), findsNothing);
+    final entryId = harness.container
+        .read(journalControllerProvider)
+        .selectedEntryId!;
+    expect(await harness.database.scripturesForEntry(entryId), hasLength(1));
+  });
+
+  testWidgets(
+    'mobile Scripture controls dock, collapse, and expand on scroll',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(390, 844);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final container = ProviderContainer(
+        overrides: [
+          youVersionBibleProvider.overrideWithValue(_FixtureBibleProvider()),
+        ],
+      );
+      addTearDown(container.dispose);
+      var closed = false;
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: MaterialApp(
+            themeMode: ThemeMode.light,
+            theme: ThemeData(platform: TargetPlatform.iOS),
+            home: ScriptureWorkspace(onClose: () => closed = true),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('scripture-drag-handle')), findsOneWidget);
+      expect(
+        find.byKey(const Key('scripture-expanded-pickers')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('scripture-collapsed-picker')), findsNothing);
+      expect(
+        tester.getTopLeft(find.byKey(const Key('scripture-book-picker'))).dy,
+        lessThan(
+          tester
+              .getBottomLeft(find.byKey(const Key('scripture-verse-list')))
+              .dy,
+        ),
+      );
+
+      await tester.tap(find.byKey(const Key('scripture-book-picker')));
+      await tester.pumpAndSettle();
+      final menuItem = find.widgetWithText(MenuItemButton, 'Genesis');
+      expect(menuItem, findsOneWidget);
+      expect(
+        tester.getBottomRight(menuItem).dy,
+        lessThanOrEqualTo(
+          tester.getTopLeft(find.byKey(const Key('scripture-book-picker'))).dy,
+        ),
+      );
+      await tester.tapAt(const Offset(380, 60));
+      await tester.pumpAndSettle();
+
+      await tester.drag(
+        find.byKey(const Key('scripture-verse-list')),
+        const Offset(0, -520),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const Key('scripture-collapsed-picker')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const Key('scripture-expanded-pickers')), findsNothing);
+      expect(
+        tester
+            .widget<AnimatedOpacity>(
+              find.byKey(const Key('scripture-top-fade')),
+            )
+            .opacity,
+        1,
+      );
+
+      await tester.tap(find.byKey(const Key('scripture-collapsed-picker')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const Key('scripture-expanded-pickers')),
+        findsOneWidget,
+      );
+
+      expect(find.byKey(const Key('close-scripture')), findsNothing);
+      await tester.tap(find.byKey(const Key('scripture-drag-handle')));
+      expect(closed, isTrue);
+    },
+  );
+
+  testWidgets('mobile Scripture chrome avoids overflow at 320 px', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 700);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    final container = ProviderContainer(
+      overrides: [
+        youVersionBibleProvider.overrideWithValue(_FixtureBibleProvider()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp(
+          theme: ThemeData(platform: TargetPlatform.iOS),
+          home: const MediaQuery(
+            data: MediaQueryData(
+              size: Size(320, 700),
+              textScaler: TextScaler.linear(1.35),
+            ),
+            child: ScriptureWorkspace(),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const Key('scripture-book-picker')), findsOneWidget);
+    expect(find.byKey(const Key('add-scripture-to-journal')), findsOneWidget);
+  });
 
   testWidgets('Scripture workspace scrolls in a short desktop window', (
     tester,
@@ -103,7 +354,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(find.text('NIV · New International Version'), findsOneWidget);
+    expect(find.text('Genesis 1'), findsOneWidget);
+    expect(find.byKey(const Key('scripture-version-picker')), findsOneWidget);
   });
 
   testWidgets('desktop phases avoid bottom overflow in a short window', (
@@ -114,12 +366,14 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     addTearDown(tester.view.resetPhysicalSize);
 
-    final harness = await _pumpCompletedApp(tester, christianMode: true);
+    final harness = await _pumpCompletedApp(tester, quietTimeLogging: true);
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.byKey(const Key('binder-settings')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    expect(find.text('Quiet Time logging'), findsOneWidget);
+    expect(find.text('Christian Mode'), findsNothing);
     Navigator.of(tester.element(find.text('Meno settings'))).pop();
     await tester.pumpAndSettle();
 
@@ -133,11 +387,142 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('writing settings change journal size and persist glass mode', (
+    tester,
+  ) async {
+    final harness = await _pumpCompletedApp(
+      tester,
+      platform: TargetPlatform.macOS,
+    );
+
+    await tester.tap(find.byKey(const Key('binder-settings')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('editor-text-size-setting')), findsOneWidget);
+    expect(find.byKey(const Key('glass-mode-setting')), findsOneWidget);
+
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(const Key('editor-text-size-setting')),
+        matching: find.text('S'),
+      ),
+    );
+    await tester.tap(find.byKey(const Key('glass-mode-setting')));
+    await tester.pumpAndSettle();
+
+    expect(
+      harness.container.read(journalControllerProvider).editorTextSize,
+      EditorTextSize.small,
+    );
+    expect(
+      harness.container.read(journalControllerProvider).glassModeEnabled,
+      isTrue,
+    );
+    expect(
+      harness.database.settings[DatabaseService.editorTextSizeSettingKey],
+      'small',
+    );
+    expect(
+      harness.database.settings[DatabaseService.glassModeSettingKey],
+      'true',
+    );
+
+    Navigator.of(tester.element(find.text('Meno settings'))).pop();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('edit-journal')));
+    await tester.pumpAndSettle();
+
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('journal-editor')))
+          .style
+          ?.fontSize,
+      18,
+    );
+    expect(
+      tester
+          .widget<TextField>(find.byKey(const Key('entry-title')))
+          .style
+          ?.fontSize,
+      19,
+    );
+  });
+
+  testWidgets('glass setting is not offered on non-macOS platforms', (
+    tester,
+  ) async {
+    await _pumpCompletedApp(tester, platform: TargetPlatform.windows);
+
+    await tester.tap(find.byKey(const Key('binder-settings')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('glass-mode-setting')), findsNothing);
+  });
+
+  testWidgets('smart bullets continue in every multiline writing field', (
+    tester,
+  ) async {
+    final harness = await _pumpCompletedApp(
+      tester,
+      quietTimeLogging: true,
+      platform: TargetPlatform.macOS,
+    );
+    await tester.tap(find.byKey(const Key('edit-journal')));
+    await tester.pumpAndSettle();
+
+    for (final key in const [Key('journal-editor'), Key('gratitude-editor')]) {
+      final field = find.byKey(key);
+      await tester.ensureVisible(field);
+      await tester.enterText(field, '- one');
+      await tester.enterText(field, '- one\n');
+      expect(tester.widget<TextField>(field).controller?.text, '- one\n- ');
+    }
+
+    await tester.tap(find.byKey(const Key('new-entry')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('new-quiet-time')));
+    await tester.pumpAndSettle();
+
+    for (final key in const [
+      Key('quiet-time-observation'),
+      Key('quiet-time-application'),
+      Key('quiet-time-prayer'),
+    ]) {
+      final field = find.byKey(key);
+      await tester.ensureVisible(field);
+      await tester.enterText(field, '- one');
+      await tester.enterText(field, '- one\n');
+      expect(tester.widget<TextField>(field).controller?.text, '- one\n- ');
+    }
+    await tester.pump(const Duration(milliseconds: 701));
+    await harness.container.read(saveCoordinatorProvider.notifier).flushAll();
+  });
+
+  testWidgets('settings can close while smart organization is starting', (
+    tester,
+  ) async {
+    final embedding = _DelayedEmbeddingService();
+    await _pumpCompletedApp(tester, embedding: embedding);
+
+    await tester.tap(find.byKey(const Key('binder-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('smart-organization-setting')));
+    await tester.pump();
+
+    Navigator.of(tester.element(find.text('Meno settings'))).pop();
+    await tester.pumpAndSettle();
+    embedding.completeDownload();
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+  });
 }
 
 Future<_Harness> _pumpCompletedApp(
   WidgetTester tester, {
-  bool christianMode = false,
+  bool quietTimeLogging = false,
+  TargetPlatform? platform,
+  EmbeddingService? embedding,
 }) async {
   final database = FakeDatabaseService();
   const dateKey = '2026-09-01';
@@ -151,19 +536,24 @@ Future<_Harness> _pumpCompletedApp(
     DailyCheckIn.forDate(dateKey: dateKey, moodAngle: .3, moodIntensity: .7),
   );
   await database.saveSetting(
-    DatabaseService.christianModeSettingKey,
-    '$christianMode',
+    DatabaseService.quietTimeLoggingSettingKey,
+    '$quietTimeLogging',
   );
   final container = ProviderContainer(
     overrides: [
       databaseServiceProvider.overrideWithValue(database),
       youVersionBibleProvider.overrideWithValue(_FixtureBibleProvider()),
+      if (embedding != null)
+        embeddingServiceProvider.overrideWithValue(embedding),
     ],
   );
   await tester.pumpWidget(
     UncontrolledProviderScope(
       container: container,
-      child: const MaterialApp(home: EditorScreen(autoInitialize: false)),
+      child: MaterialApp(
+        theme: ThemeData(platform: platform),
+        home: const EditorScreen(autoInitialize: false),
+      ),
     ),
   );
   await tester.pump();
@@ -183,7 +573,6 @@ class _FixtureBibleProvider extends YouVersionBibleProvider {
     id: '111',
     abbreviation: 'NIV',
     title: 'New International Version',
-    languageTag: 'en',
     copyright: 'NIV fixture attribution',
   );
 
@@ -192,12 +581,41 @@ class _FixtureBibleProvider extends YouVersionBibleProvider {
 
   @override
   Future<List<BibleBook>> books(BibleVersion version) async => const [
-    BibleBook('GEN', 'Genesis', 1),
+    BibleBook('GEN', 'Genesis'),
   ];
 
   @override
   Future<List<int>> chapters(BibleVersion version, BibleBook book) async =>
       const [1];
+
+  @override
+  Future<List<BiblePassage>> chapterVerses(
+    BibleVersion version,
+    BibleBook book,
+    int chapter,
+  ) async => [
+    BiblePassage(
+      id: 'GEN.1.1',
+      reference: 'Genesis 1:1',
+      content: 'In the beginning God created the heavens and the earth.',
+      version: version,
+    ),
+    BiblePassage(
+      id: 'GEN.1.2',
+      reference: 'Genesis 1:2',
+      content: 'Now the earth was formless and empty.',
+      version: version,
+    ),
+    for (var verse = 3; verse <= 24; verse++)
+      BiblePassage(
+        id: 'GEN.1.$verse',
+        reference: 'Genesis 1:$verse',
+        content:
+            'This longer fixture verse keeps the continuous chapter moving '
+            'so scrolling behavior can be exercised reliably.',
+        version: version,
+      ),
+  ];
 
   @override
   Future<BiblePassage> passage(BibleVersion version, String passageId) async =>
@@ -207,6 +625,39 @@ class _FixtureBibleProvider extends YouVersionBibleProvider {
         content: 'In the beginning God created the heavens and the earth.',
         version: version,
       );
+}
+
+class _DelayedEmbeddingService implements EmbeddingService {
+  final _download = Completer<void>();
+
+  void completeDownload() {
+    if (!_download.isCompleted) _download.complete();
+  }
+
+  @override
+  int get dimensions => 3;
+
+  @override
+  String get modelId => 'delayed-fixture';
+
+  @override
+  Stream<EmbeddingStatus> get status => const Stream.empty();
+
+  @override
+  Future<void> close() async {}
+
+  @override
+  Future<void> deleteModel() async {}
+
+  @override
+  Future<void> downloadModel() => _download.future;
+
+  @override
+  Future<List<double>> embed(String text, {bool isQuery = false}) async =>
+      const [0, 0, 1];
+
+  @override
+  Future<bool> isAvailable() async => true;
 }
 
 class _Harness {
