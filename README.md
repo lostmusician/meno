@@ -1,50 +1,134 @@
-# Meno
+<div align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/meno-lockup-reversed.svg">
+    <img src="assets/brand/meno-lockup.svg" alt="Meno" width="360">
+  </picture>
 
-Meno is a private, local-first journal for desktop and mobile. It combines a
-quiet full-page editor with a horizontal daily binder, optional on-device smart
-organization, and an optional Scripture workspace for Quiet Time journaling.
+  <p><em>A private place to notice, reflect, and remember.</em></p>
+
+  <p>
+    <strong>Private and local-first</strong>&nbsp;&nbsp;·&nbsp;&nbsp;
+    <strong>Calm daily journaling</strong>&nbsp;&nbsp;·&nbsp;&nbsp;
+    <strong>Optional on-device organization</strong>
+  </p>
+</div>
+
+<br>
+
+![Meno's full-page journal open to a fictional entry about a quiet morning](docs/images/readme-hero.png)
+
+Meno is a quiet journal for desktop and mobile. It gives each day a spacious
+page for writing, a gentle mood check-in, and a binder for returning to the
+moments you have kept. Your journal lives on your device, works without an
+account, and does not need an internet connection or AI model.
+
+## Why Meno
+
+| A calmer page | A sense of time | Memory without surveillance |
+| --- | --- | --- |
+| A warm, full-page editor keeps the interface out of the way while you write. | Daily pages, gratitude, mood, and additional notes stay together in a browsable binder. | Search, tags, and related entries can run locally; generated suggestions never replace your own tags. |
+
+- Write one Daily Journal and any number of additional entries for each day.
+- Record gratitude and a reflective mood without turning either into a score or
+  diagnosis.
+- Move naturally between days, weeks, and months in the horizontal binder.
+- Add an optional Quiet Time workspace for personal reflection and linked
+  Scripture references.
+
+## A small tour
+
+### Write without clutter
+
+Large type, generous spacing, and a gratitude footer leave room for the day to
+unfold—even on a smaller screen.
+
+<p align="center">
+  <img src="docs/images/readme-writing.png" alt="Meno's journal on a phone-sized screen with fictional writing" width="360">
+</p>
+
+### Return to what mattered
+
+Browse recorded days as pages, with mood color and nearby entries providing
+quiet context.
+
+<p align="center">
+  <img src="docs/images/readme-binder.png" alt="Meno's horizontal daily binder filled with fictional entries" width="900">
+</p>
+
+### Keep faith optional
+
+Enable Quiet Time only when you want Scripture references and structured
+reflection fields.
+
+<p align="center">
+  <img src="docs/images/readme-scripture.png" alt="Meno's optional Scripture workspace displaying fictional preview text" width="520">
+</p>
+
+## Your journal stays yours
 
 Journal writing, gratitude, mood, tags, relationships, Scripture attachments,
-and preferences are stored on the device. The core journal does not require an
-account, network connection, or AI model.
+and preferences are stored on the device. The core journal has no account and
+makes no network requests.
 
-## The journal experience
+Network access is limited to features you choose to use:
 
-- One pinned **Daily Journal** for each recorded date, with a gratitude footer.
-- Any number of separate **Additional Entries** in the same day.
-- A shared daily mood check-in represented as reflective tone and intensity,
-  not a diagnosis.
-- Time-aware routing: before the configured evening time Meno opens an
-  unfinished Daily Journal; in the evening it asks for a missing mood first.
-- A fast horizontal binder for browsing recorded days, weeks, and months.
-- A compact, always-visible entry wheel for moving between a day's entries.
-- Historical writing, gratitude, and mood remain editable.
+- **Smart Organization** can download an optional semantic model on demand.
+  Without it, local keyphrase tagging, search, and shared-tag relationships
+  continue to work.
+- **Quiet Time** requests the Scripture passage you explicitly select from
+  YouVersion. Meno stores your reflection and the structured reference, not the
+  licensed passage text.
 
-Daily completion only requires a non-empty Daily Journal and a mood check-in.
-Gratitude and Additional Entries are always optional.
+No API keys are stored in this repository.
 
-## Smart Organization
+## Download the macOS preview
 
-Smart Organization is optional and runs locally:
+<p align="center">
+  <a href="https://github.com/lostmusician/meno/releases/latest/download/Meno.dmg"><strong>Download Meno for macOS</strong></a>
+</p>
 
-- RAKE-based keyphrase extraction generates editable tags without downloading
-  a model.
+> **Early preview:** This build is not yet signed or notarized. After trying to
+> open Meno for the first time, open **System Settings → Privacy & Security**,
+> scroll down, select **Open Anyway**, and confirm with **Open**. Only use this
+> override when you downloaded Meno from this repository.
+
+The SHA-256 checksum published with each GitHub Release can be used to verify
+that the download arrived unchanged. macOS 14 or newer is recommended.
+
+### Run from source
+
+The repository also includes iOS, Android, and Windows projects.
+
+Install [Flutter](https://docs.flutter.dev/get-started/install) and the platform
+toolchain for your device, then run:
+
+```sh
+flutter pub get
+flutter run -d macos
+```
+
+Use `flutter devices` to find an attached phone, simulator, or another desktop
+target and pass its identifier to `flutter run -d`.
+
+## Optional layers
+
+### Smart Organization
+
+Smart Organization is local-first and can be turned off at any time:
+
+- RAKE-based keyphrase extraction creates editable tags without downloading a
+  model.
 - Full-text search filters by text, tag, purpose, Scripture book, and date.
-- A ranked Related Entries view is the primary cross-reference experience.
-- A bounded Connections graph shows at most 40 entries and the three strongest
-  relationships per entry.
+- Related Entries surfaces the strongest useful cross-references.
+- A bounded Connections graph keeps the overview readable.
 - An optional quantized
   [Snowflake Arctic Embed XS](https://huggingface.co/Snowflake/snowflake-arctic-embed-xs)
-  ONNX model improves semantic matching. It is English-first, downloads on
-  demand from Settings, and is verified before use.
+  ONNX model improves English-first semantic matching. It downloads only when
+  requested and is verified before use.
 
-If the embedding model is absent or unavailable, tag extraction, full-text
-search, and shared-tag relationships continue to work. Generated tags never
-replace manual tags.
+### Quiet Time
 
-## Quiet Time logging
-
-Quiet Time logging is optional and hidden when disabled. It adds:
+Quiet Time is hidden until enabled. It adds:
 
 - A focused choice of ESV, NIV, ERV, and NKJV through YouVersion.
 - A continuous Scripture reader shown in a sliding split view on desktop and
@@ -69,23 +153,14 @@ Supply the key at build or run time; never commit it:
 flutter run -d macos --dart-define=YOUVERSION_APP_KEY=your_app_key
 ```
 
-Without a key or the necessary translation licenses, the Scripture workspace
-explains that access is unavailable. Passages retain their required translation
-label and copyright attribution.
+Without a valid key and the required translation licenses, Meno explains that
+Scripture access is unavailable while the rest of the journal continues to
+work normally.
 
-## Getting started
+<details>
+<summary><strong>Development and architecture</strong></summary>
 
-Install Flutter and the platform toolchain for the device you want to run, then:
-
-```sh
-flutter pub get
-flutter run -d macos
-```
-
-Use `flutter devices` to find an attached phone, simulator, or other available
-desktop target and pass its identifier to `flutter run -d`.
-
-## Architecture
+### Project structure
 
 - `lib/models` — journal, discovery, embedding, and Scripture data types.
 - `lib/services/database_schema.dart` — the current SQLite schema.
@@ -95,13 +170,12 @@ desktop target and pass its identifier to `flutter run -d`.
   phrase filtering.
 - `lib/services/embedding_service.dart` — model lifecycle, checksum validation,
   tokenization, and ONNX inference.
-- `lib/services/organization_service.dart` — tagging, canonicalization, gradual
+- `lib/services/organization_service.dart` — tagging, canonicalization,
   indexing, and related-entry ranking.
-- `lib/services/bible_service.dart` — licensed YouVersion Bible access.
+- `lib/services/bible_service.dart` — licensed YouVersion access.
 - `lib/providers` — time-aware routing, editor state, binder navigation, and
-  capability-aware optional services.
-- `lib/ui` — mood dial, full-page editor, binder, discovery, settings, and
-  Scripture workspace.
+  optional-service capabilities.
+- `lib/ui` — mood, editor, binder, discovery, settings, and Scripture views.
 
 The app uses ordered, transactional schema migrations and refuses databases
 created by a newer Meno build without modifying them. It creates daily local
@@ -116,7 +190,12 @@ one-time bridge build using the former Sotto identity can archive and merge the
 existing `sotto.sqlite` history, then create a backup for restoration into the
 clean Meno app. The bridge never deletes either legacy source database.
 
-## Verification
+</details>
+
+<details>
+<summary><strong>Verification and platform status</strong></summary>
+
+### Checks
 
 ```sh
 flutter analyze
@@ -132,26 +211,19 @@ The embedding smoke test downloads the model into a temporary directory,
 validates its checksum, runs native ONNX inference, and removes the temporary
 copy afterward.
 
-Current verification status:
-
 | Target | Status |
 | --- | --- |
-| macOS 14+ | Analyzer, full tests, debug build, and native embedding smoke test verified |
+| macOS 14+ | Analyzer, tests, debug build, and native embedding smoke test verified |
 | iOS 16+ | Source configured; requires an Apple mobile build environment and signing |
 | Android | Source configured; build verification requires an installed Android SDK |
 | Windows | Flutter project target is present; release validation requires a Windows host |
 | Linux | Not currently generated in this repository |
 
-## Privacy and network behavior
-
-- Journal data and analysis stay on-device.
-- Smart Organization only uses the network to download its optional model.
-- Quiet Time logging uses the network for explicitly selected YouVersion content.
-- No API keys are stored in the repository.
+</details>
 
 ## License
 
-Meno is available under the [MIT License](LICENSE). Models, packages, and
-remote Bible translations retain their respective licenses and attribution
+Meno is available under the [MIT License](LICENSE). Models, packages, and remote
+Bible translations retain their respective licenses and attribution
 requirements. Arctic Embed XS is Apache-2.0 licensed; YouVersion content is
 governed by the terms and translation licenses granted to the registered app.
