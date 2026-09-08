@@ -24,8 +24,8 @@ account, and does not need an internet connection or AI model.
 
 ## Why Meno
 
-| A calmer page | A sense of time | Memory without surveillance |
-| --- | --- | --- |
+| A calmer page                                                                | A sense of time                                                                         | Memory without surveillance                                                                           |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | A warm, full-page editor keeps the interface out of the way while you write. | Daily pages, gratitude, mood, and additional notes stay together in a browsable binder. | Search, tags, and related entries can run locally; generated suggestions never replace your own tags. |
 
 - Write one Daily Journal and any number of additional entries for each day.
@@ -48,14 +48,14 @@ unfold—even on a smaller screen.
 
 ### Return to what mattered
 
-Browse recorded days as pages, with mood color and nearby entries providing
+Browse recorded days as pages, with mood colour and nearby entries providing
 quiet context.
 
 <p align="center">
   <img src="docs/images/readme-binder.png" alt="Meno's horizontal daily binder filled with fictional entries" width="900">
 </p>
 
-### Keep faith optional
+### Quiet Time
 
 Enable Quiet Time only when you want Scripture references and structured
 reflection fields.
@@ -211,13 +211,13 @@ The embedding smoke test downloads the model into a temporary directory,
 validates its checksum, runs native ONNX inference, and removes the temporary
 copy afterward.
 
-| Target | Status |
-| --- | --- |
-| macOS 14+ | Analyzer, tests, debug build, and native embedding smoke test verified |
-| iOS 16+ | Source configured; requires an Apple mobile build environment and signing |
-| Android | Source configured; build verification requires an installed Android SDK |
-| Windows | Flutter project target is present; release validation requires a Windows host |
-| Linux | Not currently generated in this repository |
+| Target    | Status                                                                        |
+| --------- | ----------------------------------------------------------------------------- |
+| macOS 14+ | Analyzer, tests, debug build, and native embedding smoke test verified        |
+| iOS 16+   | Source configured; requires an Apple mobile build environment and signing     |
+| Android   | Source configured; build verification requires an installed Android SDK       |
+| Windows   | Flutter project target is present; release validation requires a Windows host |
+| Linux     | Not currently generated in this repository                                    |
 
 </details>
 
