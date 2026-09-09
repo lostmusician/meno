@@ -178,9 +178,9 @@ class _JournalViewState extends State<_JournalView> {
                                         style: TextStyle(
                                           fontSize: 11,
                                           letterSpacing: 1.05,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .onSurfaceVariant,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.onSurfaceVariant,
                                         ),
                                       ),
                                       TextField(

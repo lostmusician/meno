@@ -43,11 +43,13 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
   String? _loadedDateKey;
   int _scriptureRevision = 0;
   bool _scripturePanelOpen = false;
+  bool _journalExitInProgress = false;
 
   @override
   void initState() {
     super.initState();
     _writingFocus = FocusNode(onKeyEvent: _handleWritingKey);
+    HardwareKeyboard.instance.addHandler(_handleGlobalKeyEvent);
     WidgetsBinding.instance.addObserver(this);
     if (widget.autoInitialize) {
       Future.microtask(() async {
@@ -123,9 +125,57 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
     return KeyEventResult.handled;
   }
 
+  bool _hasActiveTextComposition() {
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) return false;
+    final widget = focusContext.widget;
+    final editable = widget is EditableText
+        ? widget
+        : focusContext.findAncestorWidgetOfExactType<EditableText>();
+    final composing = editable?.controller.value.composing;
+    return composing != null && composing.isValid && !composing.isCollapsed;
+  }
+
+  bool _handleGlobalKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent ||
+        event.logicalKey != LogicalKeyboardKey.escape ||
+        ref.read(journalControllerProvider).phase != AppPhase.journal ||
+        ModalRoute.of(context)?.isCurrent != true ||
+        _journalExitInProgress ||
+        _hasActiveTextComposition()) {
+      return false;
+    }
+    _handleJournalEscape();
+    return true;
+  }
+
+  void _handleJournalEscape() {
+    if (ModalRoute.of(context)?.isCurrent != true ||
+        _journalExitInProgress ||
+        _hasActiveTextComposition()) {
+      return;
+    }
+    if (_scripturePanelOpen) {
+      setState(() => _scripturePanelOpen = false);
+      return;
+    }
+    _journalExitInProgress = true;
+    unawaited(
+      (() async {
+        final saved = await ref
+            .read(saveCoordinatorProvider.notifier)
+            .flushAll();
+        if (saved) {
+          await ref.read(journalControllerProvider.notifier).openBinder();
+        }
+      })().whenComplete(() => _journalExitInProgress = false),
+    );
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    HardwareKeyboard.instance.removeHandler(_handleGlobalKeyEvent);
     _titleController.dispose();
     _contentController.dispose();
     _gratitudeController.dispose();
@@ -306,41 +356,47 @@ class _EditorScreenState extends ConsumerState<EditorScreen>
                             .read(journalControllerProvider.notifier)
                             .openBinder,
                       ),
-                      AppPhase.journal => _JournalSplitView(
-                        key: const ValueKey('journal'),
-                        scriptureOpen: _scripturePanelOpen,
-                        onCloseScripture: () =>
-                            setState(() => _scripturePanelOpen = false),
-                        onAddScripture: _saveScriptureSelection,
-                        journal: _JournalView(
-                          key: const ValueKey('journal-body'),
-                          state: state,
-                          titleController: _titleController,
-                          contentController: _contentController,
-                          gratitudeController: _gratitudeController,
-                          scriptureRevision: _scriptureRevision,
-                          writingFocus: _writingFocus,
-                          onEntryChanged: _onEntryChanged,
-                          onGratitudeChanged: _onGratitudeChanged,
-                          onSelectEntry: _selectEntry,
-                          onAddEntry: () async {
-                            await ref
-                                .read(journalControllerProvider.notifier)
-                                .addEntry();
-                            if (mounted) _writingFocus.requestFocus();
-                          },
-                          onAddQuietTime: () async {
-                            await ref
-                                .read(journalControllerProvider.notifier)
-                                .addQuietTime();
-                            if (mounted) _writingFocus.requestFocus();
-                          },
-                          onOpenScripture: _openScripture,
-                          onFinish: () async {
-                            await ref
-                                .read(journalControllerProvider.notifier)
-                                .finishEditing();
-                          },
+                      AppPhase.journal => CallbackShortcuts(
+                        bindings: {
+                          const SingleActivator(LogicalKeyboardKey.escape):
+                              _handleJournalEscape,
+                        },
+                        child: _JournalSplitView(
+                          key: const ValueKey('journal'),
+                          scriptureOpen: _scripturePanelOpen,
+                          onCloseScripture: () =>
+                              setState(() => _scripturePanelOpen = false),
+                          onAddScripture: _saveScriptureSelection,
+                          journal: _JournalView(
+                            key: const ValueKey('journal-body'),
+                            state: state,
+                            titleController: _titleController,
+                            contentController: _contentController,
+                            gratitudeController: _gratitudeController,
+                            scriptureRevision: _scriptureRevision,
+                            writingFocus: _writingFocus,
+                            onEntryChanged: _onEntryChanged,
+                            onGratitudeChanged: _onGratitudeChanged,
+                            onSelectEntry: _selectEntry,
+                            onAddEntry: () async {
+                              await ref
+                                  .read(journalControllerProvider.notifier)
+                                  .addEntry();
+                              if (mounted) _writingFocus.requestFocus();
+                            },
+                            onAddQuietTime: () async {
+                              await ref
+                                  .read(journalControllerProvider.notifier)
+                                  .addQuietTime();
+                              if (mounted) _writingFocus.requestFocus();
+                            },
+                            onOpenScripture: _openScripture,
+                            onFinish: () async {
+                              await ref
+                                  .read(journalControllerProvider.notifier)
+                                  .finishEditing();
+                            },
+                          ),
                         ),
                       ),
                       AppPhase.binder => const BinderScreen(
@@ -577,18 +633,21 @@ class _LoadingView extends StatelessWidget {
         ? MenoSurfaces.of(context).page
         : const Color(0xFFF4F0E8),
     child: const Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          MenoBrandMark(size: 104),
-          SizedBox(height: 18),
-          MenoWordmark(width: 142),
-          SizedBox(height: 32),
-          SizedBox.square(
-            dimension: 18,
-            child: CircularProgressIndicator(strokeWidth: 1.6),
-          ),
-        ],
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            MenoBrandMark(size: 104),
+            SizedBox(height: 18),
+            MenoWordmark(width: 142),
+            SizedBox(height: 32),
+            SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(strokeWidth: 1.6),
+            ),
+          ],
+        ),
       ),
     ),
   );

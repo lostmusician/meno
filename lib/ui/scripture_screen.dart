@@ -585,8 +585,9 @@ class _ReaderHeader extends StatelessWidget {
     decoration: BoxDecoration(
       border: Border(
         bottom: BorderSide(
-          color: Theme.of(context).colorScheme.outlineVariant
-              .withValues(alpha: .7),
+          color: Theme.of(
+            context,
+          ).colorScheme.outlineVariant.withValues(alpha: .7),
         ),
       ),
     ),
@@ -1195,11 +1196,13 @@ class _ContinuousChapterState extends State<_ContinuousChapter> {
           key: _paragraphKey,
           text: TextSpan(
             children: spans,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: MenoTheme.serif,
               fontSize: 20,
               height: 1.72,
-              color: MenoTheme.ink,
+              color: MenoSurfaces.of(context).glassMode
+                  ? MenoTheme.glassInk
+                  : MenoTheme.ink,
             ),
           ),
         ),

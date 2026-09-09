@@ -222,7 +222,7 @@ void main() {
     expect(harness.database.saveDayEntryCallCount, 1);
   });
 
-  testWidgets('completed journal before evening shows binder mood reminder', (
+  testWidgets('completed journal before evening shows compact mood action', (
     tester,
   ) async {
     final database = FakeDatabaseService();
@@ -238,7 +238,8 @@ void main() {
       now: DateTime(2026, 9, 1, 12),
     );
 
-    expect(find.byKey(const Key('mood-reminder')), findsOneWidget);
+    expect(find.byKey(const Key('binder-add-mood')), findsOneWidget);
+    expect(find.byKey(const Key('mood-reminder')), findsNothing);
     expect(find.byKey(const Key('binder-rail')), findsOneWidget);
     expect(find.byKey(const Key('binder-pages')), findsOneWidget);
     expect(
@@ -256,6 +257,10 @@ void main() {
     expect(find.byKey(const Key('binder-pages')), findsNWidgets(2));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('binder-pages')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('binder-add-mood')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('mood-dial')), findsOneWidget);
   });
 
   testWidgets('binder wheel and keyboard navigation cross multiple days', (
@@ -346,7 +351,7 @@ void main() {
     expect(selected.compareTo(secondDate), lessThan(0));
   });
 
-  testWidgets('binder exposes journal, additional entry, and mood actions', (
+  testWidgets('binder exposes card, additional entry, and mood actions', (
     tester,
   ) async {
     final database = FakeDatabaseService();
@@ -366,7 +371,11 @@ void main() {
       now: DateTime(2026, 9, 1, 20),
     );
 
-    expect(find.byKey(const Key('edit-journal')), findsOneWidget);
+    expect(
+      find.byKey(const Key('binder-sheet-action-2026-09-01')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const Key('edit-journal')), findsNothing);
     expect(find.byKey(const Key('add-entry')), findsOneWidget);
     expect(find.byKey(const Key('edit-mood')), findsOneWidget);
 
@@ -405,6 +414,161 @@ void main() {
     expect(
       harness.container.read(binderControllerProvider).zoom,
       BinderZoom.weeks,
+    );
+  });
+
+  testWidgets('binder cards open days and drill into grouped periods', (
+    tester,
+  ) async {
+    final database = FakeDatabaseService();
+    final now = DateTime(2026, 9, 1, 20);
+    await _seedCompletedDays(database, now, 12);
+    final harness = await _pumpHarness(tester, database: database, now: now);
+
+    await tester.tap(find.text('Months'));
+    await tester.pumpAndSettle();
+    expect(
+      harness.container.read(binderControllerProvider).zoom,
+      BinderZoom.months,
+    );
+
+    await tester.tap(find.byKey(const Key('binder-sheet-action-2026-09-01')));
+    await tester.pumpAndSettle();
+    expect(
+      harness.container.read(binderControllerProvider).zoom,
+      BinderZoom.weeks,
+    );
+
+    final weekAction = find.byKey(
+      ValueKey(
+        'binder-sheet-action-${harness.container.read(binderControllerProvider).selectedDateKey}',
+      ),
+    );
+    await tester.tap(weekAction);
+    await tester.pumpAndSettle();
+    expect(
+      harness.container.read(binderControllerProvider).zoom,
+      BinderZoom.days,
+    );
+
+    final selectedDate = harness.container
+        .read(binderControllerProvider)
+        .selectedDateKey!;
+    await tester.tap(find.byKey(ValueKey('binder-sheet-action-$selectedDate')));
+    await tester.pumpAndSettle();
+    expect(
+      harness.container.read(journalControllerProvider).phase,
+      AppPhase.journal,
+    );
+    expect(
+      harness.container.read(journalControllerProvider).selectedDateKey,
+      selectedDate,
+    );
+  });
+
+  testWidgets('binder card secondary actions remain independent', (
+    tester,
+  ) async {
+    final database = FakeDatabaseService();
+    const dateKey = '2026-09-01';
+    await database.saveDayEntry(
+      DayEntry.empty(
+        dateKey: dateKey,
+        type: DayEntryType.daily,
+      ).copyWith(content: 'A finished day.'),
+    );
+    await database.saveCheckIn(
+      DailyCheckIn.forDate(dateKey: dateKey, moodAngle: .2, moodIntensity: .6),
+    );
+    final harness = await _pumpHarness(
+      tester,
+      database: database,
+      now: DateTime(2026, 9, 1, 20),
+    );
+
+    await tester.tap(find.byKey(const Key('add-entry')));
+    await tester.pumpAndSettle();
+    expect(
+      harness.container.read(journalControllerProvider).selectedEntry?.type,
+      DayEntryType.additional,
+    );
+
+    await harness.container
+        .read(journalControllerProvider.notifier)
+        .openBinder();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('edit-mood')));
+    await tester.pumpAndSettle();
+    expect(
+      harness.container.read(journalControllerProvider).phase,
+      AppPhase.mood,
+    );
+  });
+
+  testWidgets('Escape leaves journal fields and saves through binder route', (
+    tester,
+  ) async {
+    final harness = await _pumpHarness(tester, now: DateTime(2026, 9, 1, 10));
+
+    Future<void> escapeFrom(String key, String value) async {
+      final field = find.byKey(Key(key));
+      await tester.ensureVisible(field);
+      await tester.enterText(field, value);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(
+        harness.container.read(journalControllerProvider).phase,
+        AppPhase.binder,
+      );
+    }
+
+    await escapeFrom('entry-title', 'Morning notes');
+    await tester.tap(find.byKey(const Key('binder-sheet-action-2026-09-01')));
+    await tester.pumpAndSettle();
+    await escapeFrom('journal-editor', 'Saved with Escape.');
+    await tester.tap(find.byKey(const Key('binder-sheet-action-2026-09-01')));
+    await tester.pumpAndSettle();
+    await escapeFrom('gratitude-editor', 'A quiet morning.');
+
+    final saved = harness.database.entries.values.firstWhere(
+      (entry) => entry.title == 'Morning notes',
+    );
+    expect(saved.title, 'Morning notes');
+    expect(saved.content, 'Saved with Escape.');
+    expect(harness.database.days['2026-09-01']?.gratitude, 'A quiet morning.');
+  });
+
+  testWidgets('Escape leaves active text composition intact', (tester) async {
+    final harness = await _pumpHarness(tester, now: DateTime(2026, 9, 1, 10));
+    final editor = find.byKey(const Key('journal-editor'));
+    await tester.tap(editor);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'あ',
+        selection: TextSelection.collapsed(offset: 1),
+        composing: TextRange(start: 0, end: 1),
+      ),
+    );
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(
+      harness.container.read(journalControllerProvider).phase,
+      AppPhase.journal,
+    );
+
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'あ',
+        selection: TextSelection.collapsed(offset: 1),
+      ),
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(
+      harness.container.read(journalControllerProvider).phase,
+      AppPhase.binder,
     );
   });
 

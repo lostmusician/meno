@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meno/models/journal_entry.dart';
@@ -51,7 +52,7 @@ void main() {
         platform: TargetPlatform.macOS,
       );
 
-      await tester.tap(find.byKey(const Key('edit-journal')));
+      await tester.tap(find.byKey(const Key('binder-sheet-action-2026-09-01')));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('new-entry')), findsOneWidget);
       expect(find.byKey(const Key('open-scripture')), findsNothing);
@@ -183,7 +184,7 @@ void main() {
       platform: TargetPlatform.iOS,
     );
 
-    await tester.tap(find.byKey(const Key('edit-journal')));
+    await tester.tap(find.byKey(const Key('binder-sheet-action-2026-09-01')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('new-entry')));
     await tester.pumpAndSettle();
@@ -377,7 +378,7 @@ void main() {
     Navigator.of(tester.element(find.text('Meno settings'))).pop();
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('edit-journal')));
+    await tester.tap(find.byKey(const Key('binder-sheet-action-2026-09-01')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
@@ -429,7 +430,7 @@ void main() {
 
     Navigator.of(tester.element(find.text('Meno settings'))).pop();
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('edit-journal')));
+    await tester.tap(find.byKey(const Key('binder-sheet-action-2026-09-01')));
     await tester.pumpAndSettle();
 
     expect(
@@ -459,6 +460,31 @@ void main() {
     expect(find.byKey(const Key('glass-mode-setting')), findsNothing);
   });
 
+  testWidgets('binder sheets use neutral depth without a mood glow', (
+    tester,
+  ) async {
+    await _pumpCompletedApp(tester);
+
+    for (final zoom in const ['Days', 'Weeks', 'Months']) {
+      await tester.tap(
+        find.descendant(
+          of: find.byKey(const Key('binder-zoom')),
+          matching: find.text(zoom),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final sheet = tester.widget<Container>(
+        find.byKey(const Key('binder-sheet-2026-09-01')),
+      );
+      final decoration = sheet.decoration! as BoxDecoration;
+      expect(decoration.boxShadow, hasLength(1));
+      final shadow = decoration.boxShadow!.single;
+      expect(shadow.color, const Color(0x18000000));
+      expect(shadow.spreadRadius, 0);
+    }
+  });
+
   testWidgets('smart bullets continue in every multiline writing field', (
     tester,
   ) async {
@@ -467,7 +493,7 @@ void main() {
       quietTimeLogging: true,
       platform: TargetPlatform.macOS,
     );
-    await tester.tap(find.byKey(const Key('edit-journal')));
+    await tester.tap(find.byKey(const Key('binder-sheet-action-2026-09-01')));
     await tester.pumpAndSettle();
 
     for (final key in const [Key('journal-editor'), Key('gratitude-editor')]) {
@@ -496,6 +522,96 @@ void main() {
     }
     await tester.pump(const Duration(milliseconds: 701));
     await harness.container.read(saveCoordinatorProvider.notifier).flushAll();
+  });
+
+  testWidgets('Escape saves additional and Quiet Time entries', (tester) async {
+    final harness = await _pumpCompletedApp(
+      tester,
+      quietTimeLogging: true,
+      platform: TargetPlatform.macOS,
+    );
+    final controller = harness.container.read(
+      journalControllerProvider.notifier,
+    );
+
+    await tester.tap(find.byKey(const Key('binder-sheet-action-2026-09-01')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('new-entry')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byKey(const Key('journal-editor')),
+      'A saved additional note.',
+    );
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(controller.state.phase, AppPhase.binder);
+    expect(
+      harness.database.entries.values.any(
+        (entry) => entry.content == 'A saved additional note.',
+      ),
+      isTrue,
+    );
+
+    await controller.openDay('2026-09-01');
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('new-entry')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('new-quiet-time')));
+    await tester.pumpAndSettle();
+    final quietTimeId = controller.state.selectedEntryId!;
+    final values = <String, String>{
+      'quiet-time-observation': 'A patient observation.',
+      'quiet-time-application': 'A practical response.',
+      'quiet-time-prayer': 'A short prayer.',
+    };
+
+    for (final field in values.entries) {
+      await tester.ensureVisible(find.byKey(Key(field.key)));
+      await tester.enterText(find.byKey(Key(field.key)), field.value);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(controller.state.phase, AppPhase.binder);
+      await controller.openDay('2026-09-01');
+      await controller.selectEntry(quietTimeId);
+      await tester.pumpAndSettle();
+    }
+
+    await harness.container.read(saveCoordinatorProvider.notifier).flushAll();
+    final reflection = await harness.database.quietTimeForEntry(quietTimeId);
+    expect(reflection?.observation, values['quiet-time-observation']);
+    expect(reflection?.application, values['quiet-time-application']);
+    expect(reflection?.prayer, values['quiet-time-prayer']);
+  });
+
+  testWidgets('Escape closes Scripture before returning to the binder', (
+    tester,
+  ) async {
+    final harness = await _pumpCompletedApp(
+      tester,
+      quietTimeLogging: true,
+      platform: TargetPlatform.macOS,
+    );
+    await tester.tap(find.byKey(const Key('binder-sheet-action-2026-09-01')));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('attach-scripture')));
+    await tester.tap(find.byKey(const Key('attach-scripture')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('desktop-scripture-panel')), findsOneWidget);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('scripture-verse-list')), findsNothing);
+    expect(
+      harness.container.read(journalControllerProvider).phase,
+      AppPhase.journal,
+    );
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(
+      harness.container.read(journalControllerProvider).phase,
+      AppPhase.binder,
+    );
   });
 
   testWidgets('settings can close while smart organization is starting', (

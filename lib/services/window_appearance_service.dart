@@ -10,6 +10,8 @@ class WindowAppearanceService {
   final MethodChannel _channel;
   final bool _isMacOS;
 
+  bool get isSupported => _isMacOS;
+
   Future<void> setGlassMode(bool enabled) async {
     if (!_isMacOS) return;
     try {

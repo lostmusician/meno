@@ -62,9 +62,10 @@ class _BinderScreenState extends ConsumerState<BinderScreen>
     super.dispose();
   }
 
-  void _changeZoom(BinderZoom zoom) {
+  void _changeZoom(BinderZoom zoom, {String? anchorDateKey}) {
     if (zoom == ref.read(binderControllerProvider).zoom) return;
-    _pendingZoomAnchor = ref.read(binderControllerProvider).selectedDateKey;
+    _pendingZoomAnchor =
+        anchorDateKey ?? ref.read(binderControllerProvider).selectedDateKey;
     ref.read(binderControllerProvider.notifier).setZoom(zoom);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -81,6 +82,21 @@ class _BinderScreenState extends ConsumerState<BinderScreen>
         ref.read(binderControllerProvider.notifier).selectDate(anchor);
       }
     });
+  }
+
+  void _activateItem(_BinderItem item, BinderZoom zoom) {
+    switch (zoom) {
+      case BinderZoom.days:
+        unawaited(
+          ref
+              .read(journalControllerProvider.notifier)
+              .openDay(item.anchorDateKey),
+        );
+      case BinderZoom.weeks:
+        _changeZoom(BinderZoom.days, anchorDateKey: item.anchorDateKey);
+      case BinderZoom.months:
+        _changeZoom(BinderZoom.weeks, anchorDateKey: item.anchorDateKey);
+    }
   }
 
   void _zoomBy(int delta) {
@@ -282,6 +298,36 @@ class _BinderScreenState extends ConsumerState<BinderScreen>
                         ],
                       ),
                     ),
+                    if (app.showMoodReminder)
+                      Builder(
+                        builder: (context) {
+                          void addMood() {
+                            unawaited(
+                              ref
+                                  .read(journalControllerProvider.notifier)
+                                  .openMood(localDateKey(DateTime.now())),
+                            );
+                          }
+
+                          if (MediaQuery.sizeOf(context).width < 680) {
+                            return IconButton(
+                              key: const Key('binder-add-mood'),
+                              tooltip: 'Add mood',
+                              onPressed: addMood,
+                              icon: const Icon(Icons.mood_rounded),
+                            );
+                          }
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 4),
+                            child: FilledButton.tonalIcon(
+                              key: const Key('binder-add-mood'),
+                              onPressed: addMood,
+                              icon: const Icon(Icons.mood_rounded, size: 18),
+                              label: const Text('Add mood'),
+                            ),
+                          );
+                        },
+                      ),
                     IconButton(
                       key: const Key('binder-discovery'),
                       tooltip: 'Search journal',
@@ -297,14 +343,6 @@ class _BinderScreenState extends ConsumerState<BinderScreen>
                   ],
                 ),
               ),
-              if (app.showMoodReminder)
-                _MoodReminder(
-                  onPressed: () async {
-                    await ref
-                        .read(journalControllerProvider.notifier)
-                        .openMood(localDateKey(DateTime.now()));
-                  },
-                ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: SegmentedButton<BinderZoom>(
@@ -463,6 +501,8 @@ class _BinderScreenState extends ConsumerState<BinderScreen>
                                     compact: compact,
                                     onSelect: (index) =>
                                         _animateToIndex(index, items),
+                                    onActivate: (item) =>
+                                        _activateItem(item, binder.zoom),
                                   ),
                                 ),
                               ),
