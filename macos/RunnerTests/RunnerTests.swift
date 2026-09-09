@@ -4,51 +4,48 @@ import XCTest
 
 class RunnerTests: XCTestCase {
   func testWindowContentPlacesVibrancyBehindForeground() {
-    let foreground = NSViewController()
-    let controller = WindowContentViewController(
-      foregroundViewController: foreground,
+    let foreground = NSView(
+      frame: NSRect(x: 0, y: 0, width: 800, height: 600)
+    )
+    let background = WindowAppearanceController.installBackground(
+      in: foreground,
       prefersModernGlass: false
     )
-    _ = controller.view
     let vibrancyView = try! XCTUnwrap(
-      controller.backgroundEffectView as? NSVisualEffectView
+      background as? NSVisualEffectView
     )
 
-    XCTAssertEqual(controller.view.subviews.count, 2)
-    XCTAssertTrue(controller.view.subviews[0] === vibrancyView)
-    XCTAssertTrue(controller.view.subviews[1] === foreground.view)
-    XCTAssertEqual(vibrancyView.frame, controller.view.bounds)
-    XCTAssertEqual(foreground.view.frame, controller.view.bounds)
+    XCTAssertEqual(foreground.subviews.count, 1)
+    XCTAssertTrue(foreground.subviews[0] === vibrancyView)
+    XCTAssertEqual(vibrancyView.frame, foreground.bounds)
     XCTAssertTrue(vibrancyView.autoresizingMask.contains(.width))
     XCTAssertTrue(vibrancyView.autoresizingMask.contains(.height))
-    XCTAssertTrue(foreground.view.autoresizingMask.contains(.width))
-    XCTAssertTrue(foreground.view.autoresizingMask.contains(.height))
     XCTAssertEqual(vibrancyView.material, .underWindowBackground)
     XCTAssertEqual(vibrancyView.blendingMode, .behindWindow)
     XCTAssertEqual(vibrancyView.state, .followsWindowActiveState)
     XCTAssertTrue(vibrancyView.isHidden)
 
-    controller.view.frame = NSRect(x: 0, y: 0, width: 1024, height: 720)
-    XCTAssertEqual(vibrancyView.frame, controller.view.bounds)
-    XCTAssertEqual(foreground.view.frame, controller.view.bounds)
+    foreground.frame = NSRect(x: 0, y: 0, width: 1024, height: 720)
+    XCTAssertEqual(vibrancyView.frame, foreground.bounds)
 
     let center = NSPoint(
-      x: controller.view.bounds.midX,
-      y: controller.view.bounds.midY
+      x: foreground.bounds.midX,
+      y: foreground.bounds.midY
     )
     XCTAssertNil(vibrancyView.hitTest(center))
-    XCTAssertTrue(controller.view.hitTest(center) === foreground.view)
+    XCTAssertTrue(foreground.hitTest(center) === foreground)
   }
 
   @available(macOS 26.0, *)
   func testWindowContentUsesRegularGlassOnMacOS26() throws {
-    let foreground = NSViewController()
-    let controller = WindowContentViewController(
-      foregroundViewController: foreground
+    let foreground = NSView(
+      frame: NSRect(x: 0, y: 0, width: 800, height: 600)
     )
-    _ = controller.view
+    let background = WindowAppearanceController.installBackground(
+      in: foreground
+    )
     let glassView = try XCTUnwrap(
-      controller.backgroundEffectView as? NSGlassEffectView
+      background as? NSGlassEffectView
     )
 
     XCTAssertEqual(glassView.style, .regular)
