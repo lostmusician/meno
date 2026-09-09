@@ -1,8 +1,5 @@
 <div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/brand/meno-lockup-reversed.svg">
-    <img src="assets/brand/meno-lockup.svg" alt="Meno" width="360">
-  </picture>
+  <img src="assets/brand/meno-wordmark-sage.png" alt="Meno" width="360">
 
   <p><em>A private place to notice, reflect, and remember.</em></p>
 
