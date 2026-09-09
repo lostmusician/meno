@@ -12,7 +12,7 @@
 
 <br>
 
-![Meno's full-page journal open to a fictional entry about a quiet morning](docs/images/readme-hero.png)
+![Meno's full-page daily journal in Glass Mode](docs/images/readme-hero.png)
 
 Meno is a quiet journal for desktop and mobile. It gives each day a spacious
 page for writing, a gentle mood check-in, and a binder for returning to the
@@ -58,7 +58,7 @@ Enable Quiet Time only when you want Scripture references and structured
 reflection fields.
 
 <p align="center">
-  <img src="docs/images/readme-scripture.png" alt="Meno's optional Scripture workspace displaying fictional preview text" width="520">
+  <img src="docs/images/readme-scripture.png" alt="Meno's journal and Scripture workspace in Glass Mode" width="520">
 </p>
 
 ## Your journal stays yours
