@@ -27,15 +27,12 @@ final class PassthroughGlassEffectView: NSGlassEffectView {
   }
 }
 
-final class WindowContentViewController: NSViewController {
-  let backgroundEffectView: NSView
-  let foregroundViewController: NSViewController
-
-  init(
-    foregroundViewController: NSViewController,
+enum WindowAppearanceController {
+  static func installBackground(
+    in foregroundView: NSView,
     prefersModernGlass: Bool = true
-  ) {
-    self.foregroundViewController = foregroundViewController
+  ) -> NSView {
+    let backgroundEffectView: NSView
     if #available(macOS 26.0, *), prefersModernGlass {
       let glassView = PassthroughGlassEffectView()
       glassView.style = .regular
@@ -49,37 +46,17 @@ final class WindowContentViewController: NSViewController {
       vibrancyView.state = .followsWindowActiveState
       backgroundEffectView = vibrancyView
     }
-    super.init(nibName: nil, bundle: nil)
-  }
-
-  required init?(coder: NSCoder) {
-    fatalError("init(coder:) has not been implemented")
-  }
-
-  override func loadView() {
-    view = NSView()
-  }
-
-  override func viewDidLoad() {
-    super.viewDidLoad()
-
-    backgroundEffectView.frame = view.bounds
+    backgroundEffectView.frame = foregroundView.bounds
     backgroundEffectView.autoresizingMask = [.width, .height]
     backgroundEffectView.isHidden = true
-    view.addSubview(backgroundEffectView)
-
-    addChild(foregroundViewController)
-    foregroundViewController.view.frame = view.bounds
-    foregroundViewController.view.autoresizingMask = [.width, .height]
-    view.addSubview(
-      foregroundViewController.view,
-      positioned: .above,
-      relativeTo: backgroundEffectView
+    foregroundView.addSubview(
+      backgroundEffectView,
+      positioned: .below,
+      relativeTo: nil
     )
+    return backgroundEffectView
   }
-}
 
-enum WindowAppearanceController {
   static func apply(
     glassMode enabled: Bool,
     to window: NSWindow,

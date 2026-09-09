@@ -3,30 +3,23 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var flutterViewController: FlutterViewController?
-  private var windowContentViewController: WindowContentViewController?
+  private var backgroundEffectView: NSView?
   private var windowAppearanceChannel: FlutterMethodChannel?
   private var appearanceBaseline: WindowAppearanceBaseline?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     flutterViewController.backgroundColor = .clear
-    let windowContentViewController = WindowContentViewController(
-      foregroundViewController: flutterViewController
-    )
     self.flutterViewController = flutterViewController
-    self.windowContentViewController = windowContentViewController
     appearanceBaseline = WindowAppearanceBaseline(window: self)
-    let windowFrame = NSRect(x: 0, y: 0, width: 1280, height: 800)
-    let contentSize = self.contentRect(forFrameRect: windowFrame).size
-    windowContentViewController.preferredContentSize = contentSize
-    windowContentViewController.view.frame = NSRect(
-      origin: .zero,
-      size: contentSize
-    )
+    let windowFrame = self.frame
+    self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
-    self.contentViewController = windowContentViewController
-    self.minSize = NSSize(width: 900, height: 640)
     self.center()
+
+    backgroundEffectView = WindowAppearanceController.installBackground(
+      in: flutterViewController.view
+    )
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
@@ -55,17 +48,19 @@ class MainFlutterWindow: NSWindow {
     windowAppearanceChannel = channel
 
     super.awakeFromNib()
+
+    self.minSize = NSSize(width: 480, height: 500)
   }
 
   func applyGlassMode(_ enabled: Bool) {
     guard
-      let windowContentViewController,
+      let backgroundEffectView,
       let appearanceBaseline
     else { return }
     WindowAppearanceController.apply(
       glassMode: enabled,
       to: self,
-      backgroundEffectView: windowContentViewController.backgroundEffectView,
+      backgroundEffectView: backgroundEffectView,
       baseline: appearanceBaseline
     )
   }
