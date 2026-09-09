@@ -127,7 +127,6 @@ Smart Organization is local-first and can be turned off at any time:
 
 Quiet Time is hidden until enabled. It adds:
 
-- A focused choice of ESV, NIV, ERV, and NKJV through YouVersion.
 - A continuous Scripture reader shown in a sliding split view on desktop and
   as a draggable, near-full-height sheet on phones.
 - Single-verse and contiguous-range selection with linked, borderless verse
@@ -139,20 +138,6 @@ Quiet Time is hidden until enabled. It adds:
 Only user-authored reflection and structured Scripture references are embedded.
 Licensed passage text is resolved on demand and is not stored in journal
 records.
-
-### Optional YouVersion setup
-
-Register the app and follow the current
-[YouVersion Platform API requirements](https://developers.youversion.com/api-usage).
-Supply the key at build or run time; never commit it:
-
-```sh
-flutter run -d macos --dart-define=YOUVERSION_APP_KEY=your_app_key
-```
-
-Without a valid key and the required translation licenses, Meno explains that
-Scripture access is unavailable while the rest of the journal continues to
-work normally.
 
 <details>
 <summary><strong>Development and architecture</strong></summary>
