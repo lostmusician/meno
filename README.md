@@ -21,8 +21,8 @@ account, and does not need an internet connection or AI model.
 
 ## Why Meno
 
-| A calmer page | A sense of time | Memory without surveillance |
-| --- | --- | --- |
+| A calmer page                                                                | A sense of time                                                                         | Memory without surveillance                                                                           |
+| ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | A warm, full-page editor keeps the interface out of the way while you write. | Daily pages, gratitude, mood, and additional notes stay together in a browsable binder. | Search, tags, and related entries can run locally; generated suggestions never replace your own tags. |
 
 - Write one Daily Journal and any number of additional entries for each day.
@@ -127,7 +127,6 @@ Smart Organization is local-first and can be turned off at any time:
 
 Quiet Time is hidden until enabled. It adds:
 
-- A focused choice of ESV, NIV, ERV, and NKJV through YouVersion.
 - A continuous Scripture reader shown in a sliding split view on desktop and
   as a draggable, near-full-height sheet on phones.
 - Single-verse and contiguous-range selection with linked, borderless verse
@@ -139,20 +138,6 @@ Quiet Time is hidden until enabled. It adds:
 Only user-authored reflection and structured Scripture references are embedded.
 Licensed passage text is resolved on demand and is not stored in journal
 records.
-
-### Optional YouVersion setup
-
-Register the app and follow the current
-[YouVersion Platform API requirements](https://developers.youversion.com/api-usage).
-Supply the key at build or run time; never commit it:
-
-```sh
-flutter run -d macos --dart-define=YOUVERSION_APP_KEY=your_app_key
-```
-
-Without a valid key and the required translation licenses, Meno explains that
-Scripture access is unavailable while the rest of the journal continues to
-work normally.
 
 <details>
 <summary><strong>Development and architecture</strong></summary>
@@ -208,13 +193,13 @@ The embedding smoke test downloads the model into a temporary directory,
 validates its checksum, runs native ONNX inference, and removes the temporary
 copy afterward.
 
-| Target | Status |
-| --- | --- |
-| macOS 14+ | Analyzer, tests, debug build, and native embedding smoke test verified |
-| iOS 16+ | Source configured; requires an Apple mobile build environment and signing |
-| Android | Source configured; build verification requires an installed Android SDK |
-| Windows | Flutter project target is present; release validation requires a Windows host |
-| Linux | Not currently generated in this repository |
+| Target    | Status                                                                        |
+| --------- | ----------------------------------------------------------------------------- |
+| macOS 14+ | Analyzer, tests, debug build, and native embedding smoke test verified        |
+| iOS 16+   | Source configured; requires an Apple mobile build environment and signing     |
+| Android   | Source configured; build verification requires an installed Android SDK       |
+| Windows   | Flutter project target is present; release validation requires a Windows host |
+| Linux     | Not currently generated in this repository                                    |
 
 </details>
 
