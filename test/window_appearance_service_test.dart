@@ -21,6 +21,7 @@ void main() {
         });
     final service = WindowAppearanceService(channel: channel, isMacOS: true);
 
+    expect(service.isSupported, isTrue);
     await service.setGlassMode(true);
     await service.setGlassMode(false);
 
@@ -43,6 +44,7 @@ void main() {
         });
     final service = WindowAppearanceService(channel: channel, isMacOS: false);
 
+    expect(service.isSupported, isFalse);
     await service.setGlassMode(true);
 
     expect(called, isFalse);

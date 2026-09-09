@@ -5,6 +5,8 @@ abstract final class MenoTheme {
   static const appBackground = Color(0xFFF7F6F1);
   static const binderBackground = Color(0xFFF1EEE6);
   static const ink = Color(0xFF262923);
+  static const glassInk = Color(0xFFF8F5EE);
+  static const glassMutedInk = Color(0xD9F8F5EE);
   static const serif = 'Georgia';
 
   static const saveDebounce = Duration(milliseconds: 700);
@@ -27,9 +29,9 @@ class MenoSurfaces extends ThemeExtension<MenoSurfaces> {
       glassMode = false;
 
   const MenoSurfaces.glass()
-    : page = const Color(0xA3F7F6F1),
-      paper = const Color(0xB8FFFCF5),
-      elevated = const Color(0xDBFFFCF5),
+    : page = const Color(0x26F7F6F1),
+      paper = const Color(0x4DFFFCF5),
+      elevated = const Color(0x8CFFFCF5),
       glassMode = true;
 
   final Color page;

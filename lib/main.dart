@@ -30,15 +30,24 @@ class MenoApp extends ConsumerStatefulWidget {
 
 class _MenoAppState extends ConsumerState<MenoApp> with WindowListener {
   bool _closing = false;
+  late final ProviderSubscription<bool> _glassModeSubscription;
 
   @override
   void initState() {
     super.initState();
     if (Platform.isMacOS) windowManager.addListener(this);
+    _glassModeSubscription = ref.listenManual<bool>(
+      journalControllerProvider.select((state) => state.glassModeEnabled),
+      (_, enabled) => unawaited(
+        ref.read(windowAppearanceServiceProvider).setGlassMode(enabled),
+      ),
+      fireImmediately: true,
+    );
   }
 
   @override
   void dispose() {
+    _glassModeSubscription.close();
     if (Platform.isMacOS) windowManager.removeListener(this);
     super.dispose();
   }
@@ -108,24 +117,27 @@ class _MenoAppState extends ConsumerState<MenoApp> with WindowListener {
 
   @override
   Widget build(BuildContext context) {
+    final windowAppearance = ref.watch(windowAppearanceServiceProvider);
     final glassMode =
-        Platform.isMacOS &&
+        windowAppearance.isSupported &&
         ref.watch(
           journalControllerProvider.select((state) => state.glassModeEnabled),
         );
-    ref.listen<bool>(
-      journalControllerProvider.select((state) => state.glassModeEnabled),
-      (_, enabled) => unawaited(
-        ref.read(windowAppearanceServiceProvider).setGlassMode(enabled),
-      ),
-    );
     final surfaces = glassMode
         ? const MenoSurfaces.glass()
         : const MenoSurfaces.opaque();
-    final colorScheme = ColorScheme.fromSeed(
+    final baseColorScheme = ColorScheme.fromSeed(
       seedColor: const Color(0xFFAAB6A8),
-      brightness: Brightness.light,
-    ).copyWith(surface: surfaces.elevated);
+      brightness: glassMode ? Brightness.dark : Brightness.light,
+    );
+    final colorScheme = glassMode
+        ? baseColorScheme.copyWith(
+            surface: surfaces.elevated,
+            onSurface: MenoTheme.glassInk,
+            onSurfaceVariant: MenoTheme.glassMutedInk,
+          )
+        : baseColorScheme.copyWith(surface: surfaces.elevated);
+    final foregroundColor = glassMode ? MenoTheme.glassInk : MenoTheme.ink;
     return MaterialApp(
       navigatorKey: _navigatorKey,
       title: 'Meno',
@@ -141,11 +153,14 @@ class _MenoAppState extends ConsumerState<MenoApp> with WindowListener {
           modalBackgroundColor: surfaces.elevated,
         ),
         extensions: [surfaces],
-        textTheme: ThemeData.light().textTheme.apply(
-          bodyColor: MenoTheme.ink,
-          displayColor: MenoTheme.ink,
-          fontFamily: MenoTheme.serif,
-        ),
+        textTheme:
+            ThemeData(
+              brightness: glassMode ? Brightness.dark : Brightness.light,
+            ).textTheme.apply(
+              bodyColor: foregroundColor,
+              displayColor: foregroundColor,
+              fontFamily: MenoTheme.serif,
+            ),
       ),
       home: const EditorScreen(),
     );

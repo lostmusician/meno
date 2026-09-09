@@ -3,30 +3,30 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var flutterViewController: FlutterViewController?
+  private var windowContentViewController: WindowContentViewController?
   private var windowAppearanceChannel: FlutterMethodChannel?
-  private let vibrancyView = NSVisualEffectView()
+  private var appearanceBaseline: WindowAppearanceBaseline?
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
+    flutterViewController.backgroundColor = .clear
+    let windowContentViewController = WindowContentViewController(
+      foregroundViewController: flutterViewController
+    )
     self.flutterViewController = flutterViewController
+    self.windowContentViewController = windowContentViewController
+    appearanceBaseline = WindowAppearanceBaseline(window: self)
     let windowFrame = NSRect(x: 0, y: 0, width: 1280, height: 800)
-    self.contentViewController = flutterViewController
+    let contentSize = self.contentRect(forFrameRect: windowFrame).size
+    windowContentViewController.preferredContentSize = contentSize
+    windowContentViewController.view.frame = NSRect(
+      origin: .zero,
+      size: contentSize
+    )
     self.setFrame(windowFrame, display: true)
+    self.contentViewController = windowContentViewController
     self.minSize = NSSize(width: 900, height: 640)
     self.center()
-
-    vibrancyView.frame = flutterViewController.view.bounds
-    vibrancyView.autoresizingMask = [.width, .height]
-    vibrancyView.material = .underWindowBackground
-    vibrancyView.blendingMode = .behindWindow
-    vibrancyView.state = .active
-    vibrancyView.isHidden = true
-    flutterViewController.backgroundColor = .clear
-    flutterViewController.view.addSubview(
-      vibrancyView,
-      positioned: .below,
-      relativeTo: nil
-    )
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
@@ -58,10 +58,15 @@ class MainFlutterWindow: NSWindow {
   }
 
   func applyGlassMode(_ enabled: Bool) {
+    guard
+      let windowContentViewController,
+      let appearanceBaseline
+    else { return }
     WindowAppearanceController.apply(
       glassMode: enabled,
       to: self,
-      vibrancyView: vibrancyView
+      backgroundEffectView: windowContentViewController.backgroundEffectView,
+      baseline: appearanceBaseline
     )
   }
 }

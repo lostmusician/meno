@@ -177,7 +177,7 @@ class _EntryWheelState extends State<_EntryWheel> {
                         minimumSize: const Size(48, 40),
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                       ),
-                      child: const Text('Done'),
+                      child: const Text('Home'),
                     ),
                   ],
                 ),

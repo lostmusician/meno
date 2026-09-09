@@ -9,6 +9,7 @@ class _BinderRail extends StatelessWidget {
     required this.pitch,
     required this.compact,
     required this.onSelect,
+    required this.onActivate,
     super.key,
   });
 
@@ -19,6 +20,7 @@ class _BinderRail extends StatelessWidget {
   final double pitch;
   final bool compact;
   final ValueChanged<int> onSelect;
+  final ValueChanged<_BinderItem> onActivate;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -79,6 +81,7 @@ class _BinderRail extends StatelessWidget {
                 ),
                 item: items[selectedIndex],
                 zoom: zoom,
+                onPressed: () => onActivate(items[selectedIndex]),
               ),
             ),
           ),
@@ -146,32 +149,16 @@ class _PaperEdge extends StatelessWidget {
   }
 }
 
-class _MoodReminder extends StatelessWidget {
-  const _MoodReminder({required this.onPressed});
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-    child: Material(
-      color: const Color(0xFFE4DFC9),
-      borderRadius: BorderRadius.circular(16),
-      child: ListTile(
-        key: const Key('mood-reminder'),
-        title: const Text('Your mood can wait until this evening.'),
-        trailing: TextButton(
-          onPressed: onPressed,
-          child: const Text('Add now'),
-        ),
-      ),
-    ),
-  );
-}
-
 class _BinderSheet extends ConsumerWidget {
-  const _BinderSheet({required this.item, required this.zoom, super.key});
+  const _BinderSheet({
+    required this.item,
+    required this.zoom,
+    required this.onPressed,
+    super.key,
+  });
   final _BinderItem item;
   final BinderZoom zoom;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -206,143 +193,218 @@ class _BinderSheet extends ConsumerWidget {
     }.difference(itemEntryIds).length;
     final highContrast = MediaQuery.highContrastOf(context);
     return Semantics(
+      button: true,
       label: '${item.label}, ${item.days.length} recorded days',
-      child: Container(
-        key: Key('binder-sheet-${item.anchorDateKey}'),
-        margin: const EdgeInsets.fromLTRB(8, 18, 8, 30),
-        padding: const EdgeInsets.all(28),
-        clipBehavior: Clip.antiAlias,
-        decoration: BoxDecoration(
-          color: highContrast
-              ? MenoTheme.paper
-              : Color.alphaBlend(
-                  accent.withValues(alpha: .12),
-                  MenoSurfaces.of(context).glassMode
-                      ? MenoSurfaces.of(context).elevated
-                      : const Color(0xD9FFFCF5),
-                ),
+      onTapHint: zoom == BinderZoom.days
+          ? 'Open journal'
+          : zoom == BinderZoom.weeks
+          ? 'View days'
+          : 'View weeks',
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          key: Key('binder-sheet-action-${item.anchorDateKey}'),
+          onTap: onPressed,
+          mouseCursor: SystemMouseCursors.click,
           borderRadius: BorderRadius.circular(28),
-          border: highContrast
-              ? Border.all(color: accent, width: 3)
-              : Border.all(color: accent.withValues(alpha: .48), width: 1.4),
-          boxShadow: [
-            BoxShadow(
-              color: accent.withValues(alpha: .16),
-              blurRadius: 34,
-              spreadRadius: 2,
-            ),
-            const BoxShadow(
-              color: Color(0x26000000),
-              blurRadius: 24,
-              offset: Offset(0, 12),
-            ),
-          ],
-        ),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(
-            sigmaX: highContrast ? 0 : 14,
-            sigmaY: highContrast ? 0 : 14,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                item.label,
-                style: const TextStyle(
-                  fontFamily: MenoTheme.serif,
-                  fontSize: 27,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              if (tags.isNotEmpty) ...[
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final tag in tags)
-                      Chip(
-                        visualDensity: VisualDensity.compact,
-                        side: BorderSide(color: accent.withValues(alpha: .45)),
-                        backgroundColor: accent.withValues(alpha: .11),
-                        label: Text(tag),
-                      ),
-                    if (relatedCount > 0)
-                      ActionChip(
-                        visualDensity: VisualDensity.compact,
-                        avatar: const Icon(Icons.link_rounded, size: 16),
-                        label: Text('$relatedCount related'),
-                        onPressed: () => showModalBottomSheet<void>(
-                          context: context,
-                          isScrollControlled: true,
-                          showDragHandle: true,
-                          builder: (context) =>
-                              DiscoverySheet(initialEntryId: daily?.id),
-                        ),
-                      ),
-                  ],
+          child: Container(
+            key: Key('binder-sheet-${item.anchorDateKey}'),
+            margin: const EdgeInsets.fromLTRB(8, 18, 8, 30),
+            padding: const EdgeInsets.all(28),
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: highContrast
+                  ? MenoTheme.paper
+                  : Color.alphaBlend(
+                      accent.withValues(alpha: .12),
+                      MenoSurfaces.of(context).glassMode
+                          ? MenoSurfaces.of(context).paper
+                          : const Color(0xD9FFFCF5),
+                    ),
+              borderRadius: BorderRadius.circular(28),
+              border: highContrast
+                  ? Border.all(color: accent, width: 3)
+                  : Border.all(
+                      color: accent.withValues(alpha: .48),
+                      width: 1.4,
+                    ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x18000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 10),
                 ),
               ],
-              const SizedBox(height: 18),
-              if (zoom == BinderZoom.days) ...[
-                Expanded(
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final veryShort = constraints.maxHeight < 150;
-                      final short = constraints.maxHeight < 420;
-                      final excerptWidget = Text(
-                        excerpt.isEmpty ? 'A quiet page.' : excerpt,
-                        maxLines: veryShort
-                            ? 2
-                            : short
-                            ? 4
-                            : 8,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontFamily: MenoTheme.serif,
-                          fontSize: 21,
-                          height: 1.5,
+            ),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(
+                sigmaX: highContrast ? 0 : 14,
+                sigmaY: highContrast ? 0 : 14,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    item.label,
+                    style: const TextStyle(
+                      fontFamily: MenoTheme.serif,
+                      fontSize: 27,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (tags.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        for (final tag in tags)
+                          Chip(
+                            visualDensity: VisualDensity.compact,
+                            side: BorderSide(
+                              color: accent.withValues(alpha: .45),
+                            ),
+                            backgroundColor: accent.withValues(alpha: .11),
+                            label: Text(tag),
+                          ),
+                        if (relatedCount > 0)
+                          ActionChip(
+                            visualDensity: VisualDensity.compact,
+                            avatar: const Icon(Icons.link_rounded, size: 16),
+                            label: Text('$relatedCount related'),
+                            onPressed: () => showModalBottomSheet<void>(
+                              context: context,
+                              isScrollControlled: true,
+                              showDragHandle: true,
+                              builder: (context) =>
+                                  DiscoverySheet(initialEntryId: daily?.id),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 18),
+                  if (zoom == BinderZoom.days) ...[
+                    Expanded(
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final veryShort = constraints.maxHeight < 150;
+                          final short = constraints.maxHeight < 420;
+                          final excerptWidget = Text(
+                            excerpt.isEmpty ? 'A quiet page.' : excerpt,
+                            maxLines: veryShort
+                                ? 2
+                                : short
+                                ? 4
+                                : 8,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontFamily: MenoTheme.serif,
+                              fontSize: 21,
+                              height: 1.5,
+                            ),
+                          );
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (short)
+                                Expanded(child: excerptWidget)
+                              else
+                                excerptWidget,
+                              if (!veryShort &&
+                                  primary.day.gratitude.trim().isNotEmpty) ...[
+                                SizedBox(height: short ? 16 : 26),
+                                const Text(
+                                  'GRATEFUL FOR',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    letterSpacing: 1.1,
+                                  ),
+                                ),
+                                SizedBox(height: short ? 4 : 8),
+                                Text(
+                                  primary.day.gratitude,
+                                  maxLines: short ? 1 : 3,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ],
+                              if (!short && additionalCount > 0) ...[
+                                const SizedBox(height: 24),
+                                Text(
+                                  '$additionalCount additional ${additionalCount == 1 ? 'entry' : 'entries'}',
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  primary.additionalEntries
+                                      .map(
+                                        (entry) => _entryTime(entry.createdAt),
+                                      )
+                                      .join('  ·  '),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        TextButton(
+                          key: const Key('add-entry'),
+                          onPressed: () => ref
+                              .read(journalControllerProvider.notifier)
+                              .openDay(
+                                primary.day.dateKey,
+                                createAdditional: true,
+                              ),
+                          child: const Text('Add entry'),
                         ),
-                      );
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (short)
-                            Expanded(child: excerptWidget)
-                          else
-                            excerptWidget,
-                          if (!veryShort &&
-                              primary.day.gratitude.trim().isNotEmpty) ...[
-                            SizedBox(height: short ? 16 : 26),
-                            const Text(
-                              'GRATEFUL FOR',
-                              style: TextStyle(
-                                fontSize: 11,
-                                letterSpacing: 1.1,
+                        TextButton(
+                          key: const Key('edit-mood'),
+                          onPressed: () => ref
+                              .read(journalControllerProvider.notifier)
+                              .openMood(primary.day.dateKey),
+                          child: const Text('Edit mood'),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    Expanded(
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 76,
+                              height: 76,
+                              decoration: BoxDecoration(
+                                color: accent,
+                                shape: BoxShape.circle,
                               ),
                             ),
-                            SizedBox(height: short ? 4 : 8),
+                            const SizedBox(height: 20),
                             Text(
-                              primary.day.gratitude,
-                              maxLines: short ? 1 : 3,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontStyle: FontStyle.italic,
-                              ),
+                              '${item.days.length} recorded ${item.days.length == 1 ? 'day' : 'days'}',
+                              style: const TextStyle(fontSize: 18),
                             ),
-                          ],
-                          if (!short && additionalCount > 0) ...[
-                            const SizedBox(height: 24),
+                            const SizedBox(height: 8),
+                            Text('$additionalCount additional entries'),
+                            const SizedBox(height: 8),
                             Text(
-                              '$additionalCount additional ${additionalCount == 1 ? 'entry' : 'entries'}',
-                            ),
-                            const SizedBox(height: 6),
-                            Text(
-                              primary.additionalEntries
-                                  .map((entry) => _entryTime(entry.createdAt))
-                                  .join('  ·  '),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
+                              '$gratitudeCount with gratitude',
                               style: TextStyle(
                                 color: Theme.of(
                                   context,
@@ -350,75 +412,13 @@ class _BinderSheet extends ConsumerWidget {
                               ),
                             ),
                           ],
-                        ],
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    FilledButton.tonal(
-                      key: const Key('edit-journal'),
-                      onPressed: () => ref
-                          .read(journalControllerProvider.notifier)
-                          .openDay(primary.day.dateKey),
-                      child: const Text('Edit journal'),
-                    ),
-                    TextButton(
-                      key: const Key('add-entry'),
-                      onPressed: () => ref
-                          .read(journalControllerProvider.notifier)
-                          .openDay(primary.day.dateKey, createAdditional: true),
-                      child: const Text('Add entry'),
-                    ),
-                    TextButton(
-                      key: const Key('edit-mood'),
-                      onPressed: () => ref
-                          .read(journalControllerProvider.notifier)
-                          .openMood(primary.day.dateKey),
-                      child: const Text('Edit mood'),
+                        ),
+                      ),
                     ),
                   ],
-                ),
-              ] else ...[
-                Expanded(
-                  child: Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 76,
-                          height: 76,
-                          decoration: BoxDecoration(
-                            color: accent,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(height: 20),
-                        Text(
-                          '${item.days.length} recorded ${item.days.length == 1 ? 'day' : 'days'}',
-                          style: const TextStyle(fontSize: 18),
-                        ),
-                        const SizedBox(height: 8),
-                        Text('$additionalCount additional entries'),
-                        const SizedBox(height: 8),
-                        Text(
-                          '$gratitudeCount with gratitude',
-                          style: TextStyle(
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ],
+                ],
+              ),
+            ),
           ),
         ),
       ),
